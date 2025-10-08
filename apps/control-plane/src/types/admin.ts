@@ -322,3 +322,16 @@ export interface AdminStoreActions {
 }
 
 export type AdminStore = AdminStoreState & AdminStoreActions;
+
+export interface ProviderConfigPayload {
+  api_key: string;
+  test_connection?: boolean;
+}
+
+export interface ProviderConfigResponse {
+  provider: string;
+  configured: boolean;
+  connection_test?: boolean | null;
+  models_available?: number | null;
+  last_updated?: number | null;
+}

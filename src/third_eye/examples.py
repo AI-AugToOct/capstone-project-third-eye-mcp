@@ -2,16 +2,16 @@
 from __future__ import annotations
 
 EXAMPLE_CONTEXT = {
-    "session_id": "sess-123",
-    "user_id": "user-456",
+    "session_id": "sess-1736172840-a7b3c4d",
+    "user_id": "u-1736172840-dev001",
     "lang": "en",
-    "budget_tokens": 0,
+    "budget_tokens": 2000,
 }
 
 EXAMPLE_SHARINGAN = {
     "context": EXAMPLE_CONTEXT,
     "payload": {
-        "prompt": "Summarize the latest quarterly report for Acme Corp.",
+        "prompt": "Create a REST API for user authentication with JWT tokens",
         "lang": "en",
     },
 }
@@ -19,32 +19,32 @@ EXAMPLE_SHARINGAN = {
 EXAMPLE_PROMPT_HELPER = {
     "context": EXAMPLE_CONTEXT,
     "payload": {
-        "user_prompt": "Create onboarding checklist",
-        "clarification_answers_md": "### Clarification Answers\n1. Audience: internal team",
+        "user_prompt": "Build a user dashboard with analytics",
+        "clarification_answers_md": "### Clarification Answers\n1. Target audience: Business users\n2. Technology stack: React + FastAPI\n3. Analytics scope: User activity metrics\n4. Timeline: 2-week sprint",
     },
 }
 
 EXAMPLE_JOGAN = {
     "context": EXAMPLE_CONTEXT,
     "payload": {
-        "refined_prompt_md": "### Optimized Prompt\nROLE: Analyst\nTASK: Summarize Q2 results\nCONTEXT:\n- Audience: executives\nREQUIREMENTS:\n- Cite sources\nOUTPUT:\n- 300-word summary",
-        "estimated_tokens": 1200,
+        "refined_prompt_md": "### ROLE\nFull-stack developer with React and Python expertise\n\n### TASK\nBuild user analytics dashboard with real-time metrics\n\n### CONTEXT\n- Modern web application\n- Business intelligence requirements\n- Production deployment target\n\n### REQUIREMENTS\n- Responsive design for desktop and mobile\n- Real-time data updates via WebSocket\n- Export functionality for reports\n- Role-based access control\n\n### OUTPUT\n- Complete React frontend application\n- FastAPI backend with database integration\n- Comprehensive test suite\n- Deployment documentation",
+        "estimated_tokens": 3500,
     },
 }
 
 EXAMPLE_PLAN_REQUIREMENTS = {
     "context": EXAMPLE_CONTEXT,
     "payload": {
-        "summary_md": "### Summary\nImplement notification feature in dashboard",
+        "summary_md": "### Summary\nImplement real-time user analytics dashboard with WebSocket integration, role-based access, and export capabilities",
     },
 }
 
 EXAMPLE_PLAN_REVIEW = {
     "context": EXAMPLE_CONTEXT,
     "payload": {
-        "submitted_plan_md": "### Plan\n1. High-Level Overview\n...",
+        "submitted_plan_md": "### Implementation Plan\n\n#### Phase 1: Backend Infrastructure\n- Set up FastAPI application structure\n- Design database schema for analytics data\n- Implement WebSocket endpoints for real-time updates\n\n#### Phase 2: Frontend Development\n- Create React dashboard components\n- Implement chart visualization with D3.js\n- Add responsive design for mobile devices\n\n#### Phase 3: Integration & Testing\n- Connect frontend to WebSocket endpoints\n- Write comprehensive test suite\n- Performance optimization and caching",
     },
-    "reasoning_md": "### Reasoning\nPlan covers rollout and risk mitigation.",
+    "reasoning_md": "### Reasoning\nThis phased approach ensures stable incremental delivery. Backend-first approach allows parallel frontend development. WebSocket integration is critical for real-time requirements.",
 }
 
 EXAMPLE_FINAL_APPROVAL = {
@@ -99,8 +99,14 @@ EXAMPLE_TENSEIGAN = {
     "context": EXAMPLE_CONTEXT,
     "payload": {
         "draft_md": (
-            "### Draft\n- Market grew 25% YoY\n\n"
-            "### Citations\n| Claim | Source | Confidence |\n|---|---|---|\n| Market grew 25% YoY | https://example.com/report | 0.9 |"
+            "### Analytics Dashboard Market Analysis\n\n"
+            "Real-time analytics dashboards have seen 35% growth in enterprise adoption over the past year. "
+            "WebSocket-based solutions show 40% better performance than traditional polling methods.\n\n"
+            "### Citations\n"
+            "| Claim | Source | Confidence |\n"
+            "|-------|---------|------------|\n"
+            "| 35% growth in enterprise adoption | TechReport Analytics 2024 | 0.9 |\n"
+            "| 40% better WebSocket performance | Real-time Systems Benchmark 2024 | 0.85 |"
         ),
     },
     "reasoning_md": "Evidence review",
@@ -109,15 +115,15 @@ EXAMPLE_TENSEIGAN = {
 EXAMPLE_BYAKUGAN = {
     "context": EXAMPLE_CONTEXT,
     "payload": {
-        "topic": "market-update",
-        "draft_md": "### Draft\nThe market grew 25% YoY.\nNo contractions reported.",
+        "topic": "analytics-dashboard-implementation",
+        "draft_md": "### Implementation Status\nAnalytics dashboard shows real-time user engagement metrics. WebSocket connections maintain sub-100ms latency. Export functionality supports CSV and PDF formats.",
     },
-    "reasoning_md": "Consistency check",
+    "reasoning_md": "Verifying consistency with technical requirements and performance benchmarks established in earlier phases.",
 }
 
 EXAMPLE_NAVIGATOR = {
     "context": EXAMPLE_CONTEXT,
-    "payload": {"goal": "Generate a quarterly engineering report"},
+    "payload": {"goal": "Build a production-ready analytics dashboard with real-time capabilities"},
 }
 
 __all__ = [

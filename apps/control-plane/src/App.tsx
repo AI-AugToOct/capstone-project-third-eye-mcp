@@ -9,6 +9,7 @@ import ModelsPage from './pages/ModelsPage';
 import PersonasPage from './pages/PersonasPage';
 import SettingsPage from './pages/SettingsPage';
 import TenantsPage from './pages/TenantsPage';
+import ProvidersPage from './pages/ProvidersPage';
 import { useAuthStore } from './store/authStore';
 import type { AdminAuthSession } from './types/admin';
 
@@ -148,6 +149,14 @@ function AppShell({ session, mustResetPassword, onLogout, onChangePassword }: Ap
               Models
             </NavLink>
             <NavLink
+              to="/providers"
+              className={({ isActive }) =>
+                `transition hover:text-accent-primary ${isActive ? 'text-accent-primary' : ''}`
+              }
+            >
+              Providers
+            </NavLink>
+            <NavLink
               to="/settings"
               className={({ isActive }) =>
                 `transition hover:text-accent-primary ${isActive ? 'text-accent-primary' : ''}`
@@ -184,6 +193,7 @@ function AppShell({ session, mustResetPassword, onLogout, onChangePassword }: Ap
           <Route path="/tenants" element={<TenantsPage apiKey={effectiveApiKey} disabled={mustResetPassword} />} />
           <Route path="/metrics" element={<MetricsPage apiKey={effectiveApiKey} />} />
           <Route path="/models" element={<ModelsPage apiKey={effectiveApiKey} disabled={mustResetPassword} />} />
+          <Route path="/providers" element={<ProvidersPage apiKey={effectiveApiKey} disabled={mustResetPassword} />} />
           <Route path="/settings" element={<SettingsPage apiKey={effectiveApiKey} disabled={mustResetPassword} />} />
           <Route path="/personas" element={<PersonasPage apiKey={effectiveApiKey} disabled={mustResetPassword} />} />
           <Route path="/audit" element={<AuditPage apiKey={effectiveApiKey} />} />

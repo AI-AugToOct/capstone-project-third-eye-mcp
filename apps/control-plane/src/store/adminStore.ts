@@ -27,7 +27,6 @@ import type {
   ApiKeyUpdatePayload,
   TenantCreatePayload,
   TenantUpdatePayload,
-  TenantEntry,
 } from '../types/admin';
 
 const initialState: AdminStoreState = {

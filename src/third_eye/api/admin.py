@@ -45,7 +45,7 @@ from ..db import (
 )
 from ..config import CONFIG
 from ..personas import PERSONAS
-from ..groq_client import GroqClient
+from ..groq_client import GroqClient, reset_groq_client
 from ..providers.openrouter import OpenRouterProvider
 from ..providers import configure_provider
 from ..observability import BUDGET_COUNTER, snapshot_request_totals
@@ -82,6 +82,8 @@ from ..schemas.admin import (
     ProfilesUpdateRequest,
     ProviderStateResponse,
     ProviderUpdateRequest,
+    ProviderConfigRequest,
+    ProviderConfigResponse,
 )
 
 router = APIRouter()
@@ -1257,6 +1259,87 @@ async def publish_persona_endpoint(
         },
     )
     return await _build_persona_summary_async(persona_key)
+
+
+@router.get("/providers/groq/config", response_model=ProviderConfigResponse)
+async def get_groq_config(request: Request) -> ProviderConfigResponse:
+    """Get current Groq provider configuration status."""
+    _require_admin(request)
+
+    # Check if Groq API key is configured
+    groq_key = os.getenv("GROQ_API_KEY")
+    configured = bool(groq_key and groq_key.strip())
+
+    return ProviderConfigResponse(
+        provider="groq",
+        configured=configured,
+        connection_test=None,
+        models_available=None,
+        last_updated=None,
+    )
+
+
+@router.post("/providers/groq/config", response_model=ProviderConfigResponse)
+async def configure_groq_provider(request: Request, payload: ProviderConfigRequest) -> ProviderConfigResponse:
+    """Configure Groq API key and optionally test connection."""
+    _require_admin(request)
+
+    # Validate API key format
+    api_key = payload.api_key.strip()
+    if not api_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="API key cannot be empty")
+
+    if not api_key.startswith("gsk_"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Groq API key format")
+
+    connection_test_result = None
+    models_available = None
+
+    # Test connection if requested
+    if payload.test_connection:
+        try:
+            client = GroqClient(api_key=api_key)
+            models = await client.list_models()
+            await client.close()
+            connection_test_result = True
+            models_available = len(models)
+        except Exception as exc:
+            connection_test_result = False
+            # Don't raise exception, just mark test as failed
+
+    # Store the API key in environment
+    os.environ["GROQ_API_KEY"] = api_key
+
+    # Reset the global Groq client to pick up the new key
+    reset_groq_client()
+
+    # Reconfigure provider to use new key
+    try:
+        configure_provider()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to configure provider with new key: {exc}") from exc
+
+    # Record audit event
+    await record_audit_event_async(
+        actor=_current_actor(request),
+        action="provider.configure",
+        target="groq",
+        metadata={
+            "connection_test": connection_test_result,
+            "models_available": models_available,
+        },
+        ip=request.client.host if request.client else None,
+        session_id=None,
+        tenant_id=None,
+    )
+
+    return ProviderConfigResponse(
+        provider="groq",
+        configured=True,
+        connection_test=connection_test_result,
+        models_available=models_available,
+        last_updated=time.time(),
+    )
 
 
 __all__ = ["router"]

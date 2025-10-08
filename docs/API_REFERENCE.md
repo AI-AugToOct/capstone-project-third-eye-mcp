@@ -55,9 +55,17 @@ Refer to `tests/test_admin_api.py` for request/response fixtures.
 | `POST` | `/session/{session_id}/revalidate` | Re-run Tenseigan & Byakugan on latest draft. |
 | `PUT` | `/session/{session_id}/settings` | Update profile/overrides; triggers websocket broadcast. |
 
-## 3. Eye Endpoints
+## 3. Eye Orchestration
 
-Each Eye endpoint accepts a request of the form:
+Third Eye provides two approaches for interacting with validation eyes:
+
+### 3a. Recommended: Intelligent Orchestrator
+
+**`POST /eyes/overseer/orchestrate`** — The primary entry point that intelligently routes work through appropriate eyes.
+
+The orchestrator uses LLM-based analysis to determine which eyes to invoke based on your intent and work type, then executes the validation pipeline automatically.
+
+**Request Format:**
 ```json
 {
   "context": {
@@ -66,16 +74,87 @@ Each Eye endpoint accepts a request of the form:
     "user_id": "agent-7",
     "lang": "en",
     "budget_tokens": 1200,
-    "settings": { ... }  // injected automatically by the server
+    "settings": { ... }
+  },
+  "payload": {
+    "intent": "Clear validation request describing what you want validated",
+    "work": {
+      "code": "...",
+      "plan": "...",
+      "draft": "...",
+      "requirements": "..."
+    },
+    "context_info": {
+      "project": "project name",
+      "stage": "development|review|final",
+      "additional_context": "any relevant details"
+    }
+  },
+  "reasoning_md": "### Reasoning\nExplain your approach and why this work should be validated"
+}
+```
+
+**Strict Validation:**
+- All fields are **mandatory** (intent, work, context_info, reasoning_md)
+- Minimum lengths enforced (intent: 5 chars, reasoning_md: 10 chars)
+- Work must contain at least one property (code/plan/draft/requirements)
+- Context_info must contain at least one property
+- Incomplete submissions are **immediately rejected** with detailed error messages
+
+**Intelligent Routing:**
+The orchestrator analyzes your intent and work, then automatically invokes the appropriate eyes:
+- Ambiguous requests → Sharingan (clarification flow)
+- Plan submissions → Rinnegan (plan review)
+- Code/drafts → Tenseigan (validate claims) + Byakugan (consistency)
+- Complex workflows → Multi-eye pipelines
+
+**Response:**
+Returns results from all invoked eyes, or stops early if clarifications/revisions are needed.
+
+**Example:**
+```bash
+curl -X POST https://your-api.com/eyes/overseer/orchestrate \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "payload": {
+      "intent": "Validate my implementation plan for user authentication",
+      "work": { "plan": "## Plan\n1. Add auth middleware\n2. ..." },
+      "context_info": { "project": "web-app", "stage": "planning" }
+    },
+    "reasoning_md": "Need validation before implementing security-critical features"
+  }'
+```
+
+---
+
+### 3b. Advanced: Manual Eye Invocation
+
+For granular control, individual eyes can be invoked directly. This is recommended for advanced users who need fine-grained orchestration or custom workflows.
+
+**Navigator Entry Point:**
+- `POST /eyes/overseer/navigator` — Schema primer, no LLM. Must be called first to initialize pipeline state.
+
+**Request Format (applies to all individual eye endpoints):**
+```json
+{
+  "context": {
+    "session_id": "sess-123",
+    "tenant": "cli",
+    "user_id": "agent-7",
+    "lang": "en",
+    "budget_tokens": 1200,
+    "settings": { ... }
   },
   "payload": { ... },
   "reasoning_md": "### Reasoning\n..." // when required
 }
 ```
 
+**Available Individual Eyes:**
+
 | Method/Path | Eye | Notes |
 | --- | --- | --- |
-| `POST /eyes/overseer/navigator` | Overseer Navigator | No LLM, returns schema primer. |
 | `POST /eyes/sharingan/clarify` | Sharingan | Uses session ambiguity threshold. |
 | `POST /eyes/helper/rewrite_prompt` | Prompt Helper | Requires clarifications output. |
 | `POST /eyes/jogan/confirm_intent` | Jōgan | Validates ROLE/TASK/CONTEXT/REQUIREMENTS/OUTPUT. |
@@ -89,9 +168,12 @@ Each Eye endpoint accepts a request of the form:
 | `POST /eyes/byakugan/consistency_check` | Byakugan | Consistency tolerance from settings. |
 | `POST /eyes/rinnegan/final_approval` | Final approval |
 
-Helper endpoints:
-- `POST /session/{id}/clarifications`
-- `POST /session/{id}/duel`
+**Helper Endpoints:**
+- `POST /session/{id}/clarifications` — Submit clarifications
+- `POST /session/{id}/duel` — Launch agent duel
+
+**Typical Manual Flow:**
+1. Navigator → 2. Sharingan → 3. Helper → 4. Jogan → 5. Rinnegan (plan) → 6. Mangekyō (code) → 7. Tenseigan/Byakugan (text) → 8. Final Approval
 
 See unit tests in `tests/test_api.py` and `tests/test_eye_settings.py` for payload examples.
 

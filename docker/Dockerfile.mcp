@@ -1,8 +1,30 @@
-FROM oven/bun:1
+FROM oven/bun:1 AS deps
 
 WORKDIR /srv
-COPY mcp-bridge/package.json mcp-bridge/bunfig.toml mcp-bridge/tsconfig.json /srv/
-RUN bun install
-COPY mcp-bridge/src /srv/src
+
+COPY mcp-bridge/package.json mcp-bridge/bun.lockb* ./
+
+RUN bun install --frozen-lockfile --production
+
+FROM oven/bun:1 AS builder
+
+WORKDIR /srv
+
+COPY mcp-bridge/package.json mcp-bridge/tsconfig.json mcp-bridge/bunfig.toml* ./
+COPY --from=deps /srv/node_modules ./node_modules
+
+COPY mcp-bridge/src ./src
+
+RUN bun build ./src/index.ts --outdir ./dist --target bun
+
+FROM oven/bun:1-distroless AS runner
+
+WORKDIR /srv
+
+COPY --from=deps /srv/node_modules ./node_modules
+COPY --from=builder /srv/dist ./dist
+COPY --from=builder /srv/package.json ./package.json
+
 EXPOSE 7331
-CMD ["bun", "run", "src/index.ts"]
+
+CMD ["bun", "run", "dist/index.js"]

@@ -20,7 +20,25 @@ export function AuditTrail({ records, loading = false }: AuditTrailProps) {
     return <p className="rounded-2xl border border-surface-outline/40 bg-surface-raised/70 p-6 text-sm text-slate-300">Loading audit entries…</p>;
   }
   if (!records.length) {
-    return <p className="rounded-2xl border border-surface-outline/40 bg-surface-raised/70 p-6 text-sm text-slate-300">No audit entries in this range.</p>;
+    return (
+      <div className="rounded-2xl border border-surface-outline/40 bg-surface-raised/70 p-12 text-center">
+        <div className="mx-auto max-w-md space-y-4">
+          <div className="text-6xl opacity-30">📋</div>
+          <h3 className="text-xl font-semibold text-slate-200">No Audit Entries</h3>
+          <p className="text-sm text-slate-400">
+            No audit trail entries found for the selected time range and filters.
+          </p>
+          <div className="mt-6 space-y-2 text-left text-xs text-slate-500">
+            <p>• Adjust your date range filters</p>
+            <p>• Check tenant-specific filters</p>
+            <p>• Try removing all filters to see recent activity</p>
+          </div>
+          <p className="mt-6 text-xs text-slate-400">
+            All admin operations are logged automatically when they occur
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (

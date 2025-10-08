@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 import { formatRelative } from 'date-fns';
 import type { ApiKeyEntry } from '../types/admin';
+import { StatusBadge, EmptyState, Button } from './shared';
 
 export interface ApiKeyTableProps {
   apiKeys: ApiKeyEntry[];
@@ -24,9 +25,18 @@ function formatTimestamp(value?: number | null): string {
 export function ApiKeyTable({ apiKeys, onRotate, onRevoke, onRestore, onEdit, loading = false, highlightKeyId }: ApiKeyTableProps) {
   if (!apiKeys.length) {
     return (
-      <p className="rounded-2xl border border-surface-outline/60 bg-surface-raised/70 p-6 text-sm text-slate-300">
-        No API keys provisioned yet.
-      </p>
+      <EmptyState
+        icon="🔑"
+        title="No API Keys Yet"
+        description="Create your first API key to start accessing Third Eye MCP validation services."
+      >
+        <div className="mt-6 space-y-2 text-left text-xs text-slate-400">
+          <p>✓ Secure token-based authentication</p>
+          <p>✓ Role-based access control (admin/consumer)</p>
+          <p>✓ Per-key rate limiting and quotas</p>
+          <p>✓ Full audit trail for all operations</p>
+        </div>
+      </EmptyState>
     );
   }
 
@@ -83,51 +93,47 @@ export function ApiKeyTable({ apiKeys, onRotate, onRevoke, onRestore, onEdit, lo
                   })()}
                 </td>
                 <td className="px-4 py-3">
-                  <span
-                    className={clsx(
-                      'inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold',
-                      revoked ? 'bg-accent-danger/30 text-accent-danger' : 'bg-accent-success/20 text-accent-success',
-                    )}
-                  >
-                    {revoked ? 'Revoked' : 'Active'}
-                  </span>
+                  <StatusBadge
+                    status={revoked ? 'error' : 'active'}
+                    label={revoked ? 'Revoked' : 'Active'}
+                  />
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex justify-end gap-2">
-                    <button
-                      type="button"
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       onClick={() => onEdit(key)}
                       disabled={loading}
-                      className="rounded-full border border-surface-outline/60 px-3 py-1 text-xs text-slate-200 transition hover:border-accent-primary hover:text-accent-primary disabled:opacity-50"
                     >
                       Edit
-                    </button>
-                    <button
-                      type="button"
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       onClick={() => onRotate(key.id)}
                       disabled={loading}
-                      className="rounded-full border border-surface-outline/60 px-3 py-1 text-xs text-slate-200 transition hover:border-accent-primary hover:text-accent-primary disabled:opacity-50"
                     >
                       Rotate
-                    </button>
+                    </Button>
                     {revoked ? (
-                      <button
-                        type="button"
+                      <Button
+                        variant="success"
+                        size="sm"
                         onClick={() => onRestore(key.id)}
                         disabled={loading}
-                        className="rounded-full border border-accent-success/40 px-3 py-1 text-xs text-accent-success transition hover:bg-accent-success/10 disabled:opacity-50"
                       >
                         Restore
-                      </button>
+                      </Button>
                     ) : (
-                      <button
-                        type="button"
+                      <Button
+                        variant="danger"
+                        size="sm"
                         onClick={() => onRevoke(key.id)}
                         disabled={loading}
-                        className="rounded-full border border-accent-danger/40 px-3 py-1 text-xs text-accent-danger transition hover:bg-accent-danger/10 disabled:opacity-50"
                       >
                         Revoke
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </td>

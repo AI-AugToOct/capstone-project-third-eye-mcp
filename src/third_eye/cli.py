@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 import urllib.parse
@@ -227,7 +228,11 @@ def final_approval_cmd(
 @app.command("portal")
 def portal_open(
     session_id: Optional[str] = typer.Option(None, "--session-id", "-s", help="Session to highlight"),
-    base_url: str = typer.Option("http://localhost:5173", "--base-url", help="Portal base URL"),
+    base_url: str = typer.Option(
+        os.getenv("PORTAL_BASE_URL", "http://localhost:5173"),
+        "--base-url",
+        help="Portal base URL (can be set via PORTAL_BASE_URL env var)"
+    ),
     auto_close: bool = typer.Option(True, "--auto/--no-auto", help="Close this tab if another portal window is active"),
 ) -> None:
     """Open the Overseer portal in the default browser."""

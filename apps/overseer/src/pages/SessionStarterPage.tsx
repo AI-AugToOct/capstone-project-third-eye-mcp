@@ -3,8 +3,10 @@ import type { ChangeEvent, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { useSecureStorage } from '../hooks/useSecureStorage';
 import { fetchSessionDetail, fetchSessions } from '../lib/api';
 import type { SessionDetail, SessionOverview } from '../types/pipeline';
+import { SmartDropdown } from '../components/shared';
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
@@ -38,7 +40,7 @@ function formatStatusLabel(status: SessionOverview['status']): string {
 }
 
 export function SessionStarterPage() {
-  const [storedKey, setStoredKey] = useLocalStorage<string>('third-eye.api-key', '');
+  const [storedKey, setStoredKey] = useSecureStorage<string>('third-eye.api-key', '');
   const [storedSession, setStoredSession] = useLocalStorage<string>('third-eye.session-id', '');
   const [autoOpenLatest, setAutoOpenLatest] = useLocalStorage<boolean>('third-eye.portal.auto-open', false);
 
@@ -282,17 +284,20 @@ export function SessionStarterPage() {
         >
           <h2 className="text-lg font-semibold text-white">API Key</h2>
           <p className="mt-2 text-sm text-slate-400">Keys are only stored in this browser. Paste a valid Overseer API key to load your sessions.</p>
-          <label className="mt-4 flex flex-col gap-2 text-sm">
-            <span className="text-xs uppercase tracking-[0.2em] text-slate-400">API Key</span>
-            <input
+          <div className="mt-4">
+            <SmartDropdown
               value={keyDraft}
-              onChange={(event) => setKeyDraft(event.target.value)}
-              placeholder="sk_live_..."
-              className="rounded-xl border border-brand-outline/50 bg-brand-paper px-3 py-3 text-sm text-slate-100 focus:border-brand-accent focus:outline-none focus:ring-2 focus:ring-brand-accent/40"
-              autoComplete="off"
-              aria-label="API key"
+              options={[]}
+              onChange={setKeyDraft}
+              placeholder="sk_live_... or paste your API key"
+              allowCustom={true}
+              searchable={true}
+              label="API Key"
+              description="Securely stored in browser only"
+              icon="🔑"
+              required={true}
             />
-          </label>
+          </div>
           <button
             type="submit"
             className="mt-4 w-full rounded-full bg-brand-accent px-4 py-2 text-sm font-semibold text-brand-ink transition hover:bg-brand-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent/40"

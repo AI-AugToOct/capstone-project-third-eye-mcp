@@ -14,6 +14,7 @@ from ..provider_metrics import record_latency
 from ..logging import get_logger, log_json
 from ..providers import REGISTRY
 from ..db import get_tool_model_mapping_async
+from .._circuit_breaker import get_circuit_breaker, CircuitBreakerConfig
 
 
 LOG = get_logger("llm")
@@ -95,22 +96,34 @@ async def _invoke_async(tool: ToolName, persona_key: PersonaKey, payload: Dict[s
                     )
                     continue
 
+            # Wrap provider invocation in circuit breaker
+            circuit_breaker = get_circuit_breaker(
+                f"llm_{resolved_provider_name}",
+                CircuitBreakerConfig(
+                    failure_threshold=3,
+                    timeout_seconds=timeout,
+                    reset_timeout_seconds=30,
+                )
+            )
+
             try:
                 loop = asyncio.get_event_loop()
                 invoke_start = loop.time()
-                try:
-                    result = await asyncio.wait_for(
-                        provider.invoke(tool=tool, persona_key=persona_key, payload=payload, models=model_ids),
-                        timeout=timeout,
-                    )
-                except TypeError as exc:
-                    if "models" in str(exc):
-                        result = await asyncio.wait_for(
-                            provider.invoke(tool=tool, persona_key=persona_key, payload=payload),
-                            timeout=timeout,
+
+                async def _do_invoke():
+                    try:
+                        return await provider.invoke(
+                            tool=tool, persona_key=persona_key, payload=payload, models=model_ids
                         )
-                    else:
+                    except TypeError as exc:
+                        if "models" in str(exc):
+                            return await provider.invoke(
+                                tool=tool, persona_key=persona_key, payload=payload
+                            )
                         raise
+
+                # Execute with circuit breaker protection
+                result = await circuit_breaker.call(_do_invoke)
                 duration = loop.time() - invoke_start
                 log_json(
                     LOG,

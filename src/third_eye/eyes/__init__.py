@@ -1,5 +1,5 @@
 """Expose Overseer Eye tool entrypoints."""
-from .overseer import navigate, navigate_async
+from .overseer import navigate, navigate_async, orchestrate, orchestrate_async
 from .sharingan import clarify, clarify_async
 from .helper import rewrite_prompt, rewrite_prompt_async
 from .jogan import confirm_intent, confirm_intent_async
@@ -24,9 +24,15 @@ from .mangekyo import (
 from .tenseigan import validate_claims, validate_claims_async
 from .byakugan import consistency_check, consistency_check_async
 
+# Import registry initialization to ensure eyes are registered at startup
+from ._registry_init import register_all_eyes
+from .registry import EYE_REGISTRY, get_registry
+
 __all__ = [
     "navigate",
     "navigate_async",
+    "orchestrate",
+    "orchestrate_async",
     "clarify",
     "clarify_async",
     "rewrite_prompt",
@@ -51,4 +57,6 @@ __all__ = [
     "validate_claims_async",
     "consistency_check",
     "consistency_check_async",
+    "EYE_REGISTRY",
+    "get_registry",
 ]

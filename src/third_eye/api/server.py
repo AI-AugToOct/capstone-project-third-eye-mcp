@@ -38,7 +38,13 @@ from ..admin_accounts import (
     update_admin_account_async,
     verify_password,
 )
+from .._response_transformer import wrap_response_with_agent_format
+from ..csrf import csrf_protect, generate_csrf_token, CSRF_COOKIE_NAME
 from ..cache import close_redis, get_redis, redis_health_check
+from ..llm_health import check_llm_health
+from ..tenant_quotas import check_tenant_quota, increment_tenant_usage
+from ..session_cleanup import set_session_ttl, touch_session, run_cleanup_loop
+from ..admin_session_expiry import set_admin_session, extend_admin_session, check_admin_session_expired
 from ..config import CONFIG
 from ..constants import DataKey, EYE_TOOL_VERSIONS, EyeTag, ToolName, TOOL_BRANCH_MAP, TOOL_TO_EYE
 from ..db import (
@@ -95,6 +101,7 @@ from ..schemas.admin import (
 )
 from ..eyes import (
     navigate_async,
+    orchestrate_async,
     clarify_async,
     confirm_intent_async,
     consistency_check_async,
@@ -625,21 +632,55 @@ async def _attach_session_settings(payload: Dict[str, Any]) -> None:
 
 app = FastAPI(title="Third Eye MCP", version="2.0.0")
 
-
+# Permissive CORS configuration - allows all origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://127.0.0.1:5173", "http://127.0.0.1:5174"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=False,  # Must be False when allow_origins=["*"]
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
 )
+
+
+def _permissive_error_response(detail: str, status_code: int = 400) -> JSONResponse:
+    """Create an error response with permissive CORS headers."""
+    response = JSONResponse(
+        content={"detail": detail},
+        status_code=status_code
+    )
+    # Add permissive CORS headers for error responses
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
+
 
 
 @app.on_event("startup")
 async def startup() -> None:
+    env = os.getenv("ENV", "production").lower()
+    is_production = env in {"production", "prod"}
+
     await ensure_models_available()
     await init_db()
-    await ensure_bootstrap_admin_async(require_secret=False)
+
+    asyncio.create_task(run_cleanup_loop())
+    LOG.info("Session cleanup loop started")
+
+    try:
+        await ensure_bootstrap_admin_async(require_secret=is_production)
+    except RuntimeError as e:
+        if is_production:
+            LOG.critical("=" * 60)
+            LOG.critical("FATAL: Admin bootstrap failed in production mode")
+            LOG.critical(str(e))
+            LOG.critical("Action required: Set ADMIN_BOOTSTRAP_PASSWORD environment variable")
+            LOG.critical("=" * 60)
+            import sys
+            sys.exit(1)
+        else:
+            LOG.warning(f"Dev mode: Admin bootstrap skipped - {e}")
+
     reset_metrics_counters()
     reset_provider_metrics()
 
@@ -652,8 +693,27 @@ async def shutdown() -> None:
 
 
 @app.middleware("http")
+async def trace_middleware(request: Request, call_next):
+    trace_id = request.headers.get("X-Trace-Id", f"server-{uuid.uuid4().hex[:12]}")
+    request.state.trace_id = trace_id
+
+    LOG.info(f"[{trace_id}] START {request.method} {request.url.path}")
+
+    start_time = time.perf_counter()
+    response = await call_next(request)
+    elapsed = time.perf_counter() - start_time
+
+    LOG.info(f"[{trace_id}] COMPLETE {response.status_code} ({elapsed*1000:.2f}ms)")
+
+    response.headers["X-Trace-Id"] = trace_id
+    return response
+
+
+@app.middleware("http")
 async def enforce_api_key(request: Request, call_next):
     start_time = time.perf_counter()
+    trace_id = getattr(request.state, "trace_id", "unknown")
+
     if request.method == "OPTIONS" or request.url.path in _PUBLIC_PATHS:
         response = await call_next(request)
         elapsed = time.perf_counter() - start_time
@@ -669,6 +729,7 @@ async def enforce_api_key(request: Request, call_next):
     try:
         record = await validate_api_key_async(raw_key)
     except HTTPException as exc:
+        LOG.warning(f"[{trace_id}] API key validation failed: {exc.detail}")
         await _log_request(
             request=request,
             record=None,
@@ -682,14 +743,36 @@ async def enforce_api_key(request: Request, call_next):
             status=exc.status_code,
             latency=time.perf_counter() - start_time,
         )
-        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+        return _permissive_error_response(exc.detail, exc.status_code)
     request.state.api_key = record
     request.state.role = (record.get("role") or "consumer").lower()
+
+    if request.state.role == "admin":
+        key_id = record.get("id")
+        if key_id and await check_admin_session_expired(key_id):
+            return _permissive_error_response("Admin session expired", 401)
+        if key_id:
+            await extend_admin_session(key_id)
     request.state.tenant = record.get("tenant")
     request.state.account_id = record.get("account_id")
+
+    try:
+        await csrf_protect(request)
+    except HTTPException as exc:
+        LOG.warning(f"[{trace_id}] CSRF validation failed: {exc.detail}")
+        return _permissive_error_response(exc.detail, exc.status_code)
+
+    tenant = request.state.tenant
+    if tenant:
+        quota_ok, quota_error = await check_tenant_quota(tenant, tokens_needed=100)
+        if not quota_ok:
+            LOG.warning(f"[{trace_id}] Tenant quota exceeded for {tenant}: {quota_error}")
+            return _permissive_error_response(quota_error, 429)
+
     try:
         response = await call_next(request)
     except HTTPException as exc:
+        LOG.error(f"[{trace_id}] HTTPException: {exc.status_code} - {exc.detail}")
         await _log_request(
             request=request,
             record=record,
@@ -704,6 +787,7 @@ async def enforce_api_key(request: Request, call_next):
         )
         raise
     except Exception as exc:
+        LOG.error(f"[{trace_id}] Exception: {type(exc).__name__} - {str(exc)}")
         await _log_request(
             request=request,
             record=record,
@@ -729,6 +813,10 @@ async def enforce_api_key(request: Request, call_next):
             status=response.status_code,
             latency=time.perf_counter() - start_time,
         )
+
+        if tenant:
+            await increment_tenant_usage(tenant, requests=1, tokens=100)
+
         return response
 
 
@@ -745,6 +833,13 @@ def _should_auto_open_portal() -> bool:
 
 @app.post("/session", response_model=SessionCreateResponse, status_code=status.HTTP_201_CREATED)
 async def api_create_session(payload: SessionCreatePayload, request: Request) -> SessionCreateResponse:
+    raw_key = request.headers.get("X-API-Key")
+    if not raw_key:
+        raise HTTPException(status_code=401, detail="X-API-Key header required")
+    try:
+        await validate_api_key_async(raw_key)
+    except HTTPException as exc:
+        raise exc  # Keep this one as HTTPException since it's in a different context
     session_id = str(uuid.uuid4())
     overrides_payload = payload.settings.model_dump(exclude_none=True) if payload.settings else {}
     record = await build_session_settings(profile=payload.profile or DEFAULT_PROFILE_NAME, overrides=overrides_payload)
@@ -763,6 +858,8 @@ async def api_create_session(payload: SessionCreatePayload, request: Request) ->
             webbrowser.open_new_tab(portal_url)
         except Exception as exc:  # noqa: BLE001
             LOG.warning("Failed to auto-open portal for %s: %s", session_id, exc)
+
+    await set_session_ttl(session_id)
 
     await record_audit_event_async(
         actor=(getattr(request.state, "api_key", {}) or {}).get("id"),
@@ -833,13 +930,40 @@ async def health_live() -> Dict[str, str]:
 async def health_ready() -> JSONResponse:
     db_ok = await check_db_health()
     redis_ok = await redis_health_check()
-    ready = db_ok and redis_ok
+    llm_ok = await check_llm_health()
+    ready = db_ok and redis_ok and llm_ok
     status_code = 200 if ready else 503
-    payload = {"status": "ready" if ready else "degraded", "database": db_ok, "redis": redis_ok}
+    payload = {
+        "status": "ready" if ready else "degraded",
+        "database": db_ok,
+        "redis": redis_ok,
+        "llm": llm_ok
+    }
     return JSONResponse(payload, status_code=status_code)
 
 
-@app.post("/eyes/overseer/navigator")
+@app.get("/health/setup", tags=["health"])
+async def health_setup() -> Dict[str, Any]:
+    admin_count = await admin_account_count_async()
+    password_configured = bool(os.getenv(CONFIG.admin.password_env))
+    env = os.getenv("ENV", "production").lower()
+
+    return {
+        "admin_configured": admin_count > 0,
+        "bootstrap_required": admin_count == 0,
+        "password_env_set": password_configured,
+        "password_env_name": CONFIG.admin.password_env,
+        "admin_email": CONFIG.admin.email if admin_count == 0 else None,
+        "environment": env,
+        "action": (
+            f"Set {CONFIG.admin.password_env} environment variable and restart"
+            if admin_count == 0 and not password_configured
+            else None
+        ),
+    }
+
+
+@app.post("/eyes/overseer/navigator", include_in_schema=False)
 async def api_navigator(payload: Dict[str, Any], request: Request):
     await enforce_request_policies(request, payload)
     session_id = _session_id_from_payload(payload)
@@ -854,10 +978,26 @@ async def api_navigator(payload: Dict[str, Any], request: Request):
         tool_name=ToolName.OVERSEER_NAVIGATOR.value,
         result=result,
     )
-    return result
+    return wrap_response_with_agent_format(result)
 
 
-@app.post("/eyes/sharingan/clarify")
+@app.post("/eyes/overseer/orchestrate")
+async def api_orchestrate(payload: Dict[str, Any], request: Request):
+    """The true orchestrator - decides and executes intelligently."""
+    await enforce_request_policies(request, payload)
+    session_id = _session_id_from_payload(payload)
+    await _attach_session_settings(payload)
+    result = await orchestrate_async(payload)
+    session_id = _extract_session_id(payload, result)
+    await _emit_eye_update(
+        session_id=session_id,
+        tool_name="overseer/orchestrate",
+        result=result,
+    )
+    return wrap_response_with_agent_format(result)
+
+
+@app.post("/eyes/sharingan/clarify", include_in_schema=False)
 async def api_sharingan(payload: Dict[str, Any], request: Request):
     await enforce_request_policies(request, payload)
     session_id = _session_id_from_payload(payload)
@@ -871,10 +1011,10 @@ async def api_sharingan(payload: Dict[str, Any], request: Request):
         tool_name=ToolName.SHARINGAN_CLARIFY.value,
         result=result,
     )
-    return result
+    return wrap_response_with_agent_format(result)
 
 
-@app.post("/eyes/helper/rewrite_prompt")
+@app.post("/eyes/helper/rewrite_prompt", include_in_schema=False)
 async def api_helper(payload: Dict[str, Any], request: Request):
     await enforce_request_policies(request, payload)
     session_id = _session_id_from_payload(payload)
@@ -888,10 +1028,10 @@ async def api_helper(payload: Dict[str, Any], request: Request):
         tool_name=ToolName.PROMPT_HELPER_REWRITE.value,
         result=result,
     )
-    return result
+    return wrap_response_with_agent_format(result)
 
 
-@app.post("/eyes/jogan/confirm_intent")
+@app.post("/eyes/jogan/confirm_intent", include_in_schema=False)
 async def api_jogan(payload: Dict[str, Any], request: Request):
     await enforce_request_policies(request, payload)
     session_id = _session_id_from_payload(payload)
@@ -905,10 +1045,10 @@ async def api_jogan(payload: Dict[str, Any], request: Request):
         tool_name=ToolName.JOGAN_CONFIRM_INTENT.value,
         result=result,
     )
-    return result
+    return wrap_response_with_agent_format(result)
 
 
-@app.post("/eyes/rinnegan/plan_requirements")
+@app.post("/eyes/rinnegan/plan_requirements", include_in_schema=False)
 async def api_plan_requirements(payload: Dict[str, Any], request: Request):
     await enforce_request_policies(request, payload)
     session_id = _session_id_from_payload(payload)
@@ -922,10 +1062,10 @@ async def api_plan_requirements(payload: Dict[str, Any], request: Request):
         tool_name=ToolName.RINNEGAN_PLAN_REQUIREMENTS.value,
         result=result,
     )
-    return result
+    return wrap_response_with_agent_format(result)
 
 
-@app.post("/eyes/rinnegan/plan_review")
+@app.post("/eyes/rinnegan/plan_review", include_in_schema=False)
 async def api_plan_review(payload: Dict[str, Any], request: Request):
     await enforce_request_policies(request, payload)
     session_id = _session_id_from_payload(payload)
@@ -945,10 +1085,10 @@ async def api_plan_review(payload: Dict[str, Any], request: Request):
         tool_name=ToolName.RINNEGAN_PLAN_REVIEW.value,
         result=result,
     )
-    return result
+    return wrap_response_with_agent_format(result)
 
 
-@app.post("/eyes/mangekyo/review_scaffold")
+@app.post("/eyes/mangekyo/review_scaffold", include_in_schema=False)
 async def api_review_scaffold(payload: Dict[str, Any], request: Request):
     await enforce_request_policies(request, payload)
     session_id = _session_id_from_payload(payload)
@@ -962,10 +1102,10 @@ async def api_review_scaffold(payload: Dict[str, Any], request: Request):
         tool_name=ToolName.MANGEKYO_REVIEW_SCAFFOLD.value,
         result=result,
     )
-    return result
+    return wrap_response_with_agent_format(result)
 
 
-@app.post("/eyes/mangekyo/review_impl")
+@app.post("/eyes/mangekyo/review_impl", include_in_schema=False)
 async def api_review_impl(payload: Dict[str, Any], request: Request):
     await enforce_request_policies(request, payload)
     session_id = _session_id_from_payload(payload)
@@ -979,10 +1119,10 @@ async def api_review_impl(payload: Dict[str, Any], request: Request):
         tool_name=ToolName.MANGEKYO_REVIEW_IMPL.value,
         result=result,
     )
-    return result
+    return wrap_response_with_agent_format(result)
 
 
-@app.post("/eyes/mangekyo/review_tests")
+@app.post("/eyes/mangekyo/review_tests", include_in_schema=False)
 async def api_review_tests(payload: Dict[str, Any], request: Request):
     await enforce_request_policies(request, payload)
     session_id = _session_id_from_payload(payload)
@@ -996,10 +1136,10 @@ async def api_review_tests(payload: Dict[str, Any], request: Request):
         tool_name=ToolName.MANGEKYO_REVIEW_TESTS.value,
         result=result,
     )
-    return result
+    return wrap_response_with_agent_format(result)
 
 
-@app.post("/eyes/mangekyo/review_docs")
+@app.post("/eyes/mangekyo/review_docs", include_in_schema=False)
 async def api_review_docs(payload: Dict[str, Any], request: Request):
     await enforce_request_policies(request, payload)
     session_id = _session_id_from_payload(payload)
@@ -1013,10 +1153,10 @@ async def api_review_docs(payload: Dict[str, Any], request: Request):
         tool_name=ToolName.MANGEKYO_REVIEW_DOCS.value,
         result=result,
     )
-    return result
+    return wrap_response_with_agent_format(result)
 
 
-@app.post("/eyes/tenseigan/validate_claims")
+@app.post("/eyes/tenseigan/validate_claims", include_in_schema=False)
 async def api_validate_claims(payload: Dict[str, Any], request: Request):
     await enforce_request_policies(request, payload)
     session_id = _session_id_from_payload(payload)
@@ -1037,10 +1177,10 @@ async def api_validate_claims(payload: Dict[str, Any], request: Request):
         tool_name=ToolName.TENSEIGAN_VALIDATE_CLAIMS.value,
         result=result,
     )
-    return result
+    return wrap_response_with_agent_format(result)
 
 
-@app.post("/eyes/byakugan/consistency_check")
+@app.post("/eyes/byakugan/consistency_check", include_in_schema=False)
 async def api_consistency(payload: Dict[str, Any], request: Request):
     await enforce_request_policies(request, payload)
     session_id = _session_id_from_payload(payload)
@@ -1069,10 +1209,10 @@ async def api_consistency(payload: Dict[str, Any], request: Request):
         tool_name=ToolName.BYAKUGAN_CONSISTENCY_CHECK.value,
         result=result,
     )
-    return result
+    return wrap_response_with_agent_format(result)
 
 
-@app.post("/eyes/rinnegan/final_approval")
+@app.post("/eyes/rinnegan/final_approval", include_in_schema=False)
 async def api_final(payload: Dict[str, Any], request: Request):
     await enforce_request_policies(request, payload)
     session_id = _session_id_from_payload(payload)
@@ -1086,7 +1226,7 @@ async def api_final(payload: Dict[str, Any], request: Request):
         tool_name=ToolName.RINNEGAN_FINAL_APPROVAL.value,
         result=result,
     )
-    return result
+    return wrap_response_with_agent_format(result)
 
 
 @app.get("/session/{session_id}/events")
@@ -1283,6 +1423,8 @@ async def api_update_settings(session_id: str, payload: SessionSettingsUpdatePay
     if getattr(request.state, "role", "").lower() != "admin":
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
+    await touch_session(session_id)
+
     try:
         existing = await get_session_settings_async(session_id)
     except RuntimeError:
@@ -1361,9 +1503,15 @@ async def api_revalidate(session_id: str, payload: RevalidatePayload, request: R
 async def ws_pipeline(websocket: WebSocket, session_id: str):
     api_key = websocket.headers.get("X-API-Key")
     if not api_key:
-        query_key = websocket.query_params.get("api_key")
-        if query_key:
-            api_key = query_key
+        subprotocols = websocket.headers.get("sec-websocket-protocol", "").split(",")
+        for proto in subprotocols:
+            proto = proto.strip()
+            if proto.startswith("api-key-"):
+                api_key = proto[8:]
+                break
+    if not api_key:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Authentication required")
+        return
     try:
         record = await validate_api_key_async(api_key)
     except HTTPException:
@@ -1372,6 +1520,7 @@ async def ws_pipeline(websocket: WebSocket, session_id: str):
 
     await websocket.accept()
     await PIPELINE_BUS.register(session_id, websocket)
+    await touch_session(session_id)
     await record_audit_event_async(
         actor=record.get("id"),
         action="ws_connect",
@@ -1417,12 +1566,15 @@ async def admin_bootstrap_status() -> Dict[str, Any]:
 
 @app.post("/admin/auth/login", response_model=AdminLoginResponse, tags=["admin"])
 async def admin_login(payload: AdminLoginRequest, request: Request) -> AdminLoginResponse:
+    ip = request.client.host if request.client else "unknown"
+    await _enforce_rate_limit(key_id=f"login:{ip}", rate_cfg={"per_minute": 5, "burst": 10, "window_seconds": 60})
     try:
         account = await authenticate_admin_async(payload.email, payload.password)
     except AuthenticationError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
     key_id, api_key = await issue_admin_api_key_async(account["id"])
+    await set_admin_session(key_id, account["id"])
     sanitized = sanitize_admin_record(account)
     await record_audit_event_async(
         actor=account["id"],
@@ -1433,12 +1585,24 @@ async def admin_login(payload: AdminLoginRequest, request: Request) -> AdminLogi
         session_id=None,
         tenant_id=None,
     )
-    return AdminLoginResponse(
-        key_id=key_id,
-        api_key=api_key,
-        account=AdminAccountResponse(**sanitized),
-        force_password_reset=sanitized["require_password_reset"],
+    csrf_token = generate_csrf_token()
+    response = JSONResponse(
+        content={
+            "key_id": key_id,
+            "api_key": api_key,
+            "account": sanitized,
+            "force_password_reset": sanitized["require_password_reset"],
+        }
     )
+    response.set_cookie(
+        key=CSRF_COOKIE_NAME,
+        value=csrf_token,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+        max_age=3600
+    )
+    return response
 
 
 async def _require_admin_request_async(request: Request) -> tuple[str, Dict[str, Any]]:

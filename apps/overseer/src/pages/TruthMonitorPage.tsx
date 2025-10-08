@@ -7,8 +7,13 @@ import EyesTab from '../components/monitor/tabs/EyesTab';
 import EvidenceTab from '../components/monitor/tabs/EvidenceTab';
 import OperationsTab from '../components/monitor/tabs/OperationsTab';
 import DiagnosticsTab from '../components/monitor/tabs/DiagnosticsTab';
+import LiveActivityFeed from '../components/LiveActivityFeed';
+import MetricCard from '../components/MetricCard';
+import WebSocketStatus from '../components/WebSocketStatus';
+import { NotificationContainer, processEventNotification } from '../components/NotificationToast';
 import { usePipelineWS } from '../hooks/usePipelineWS';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { useSecureStorage } from '../hooks/useSecureStorage';
 import { usePipelineStore } from '../store/pipelineStore';
 import HeroRibbon from '../components/monitor/HeroRibbon';
 import { fetchSessionSummary, updateSessionSettings, postResubmitRequest, fetchSessions } from '../lib/api';
@@ -39,7 +44,7 @@ export function TruthMonitorPage() {
   const params = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
   const [storedSession, setStoredSession] = useLocalStorage<string>('third-eye.session-id', '');
-  const [storedKey, setStoredKey] = useLocalStorage<string>('third-eye.api-key', '');
+  const [storedKey, setStoredKey] = useSecureStorage<string>('api-key', '');
   const [noviceMode, setNoviceMode] = useLocalStorage<boolean>('third-eye.mode.novice', true);
   const [personaMode, setPersonaMode] = useLocalStorage<boolean>('third-eye.mode.persona', true);
   const [activeTab, setActiveTab] = useLocalStorage<TabKey>('third-eye.monitor.tab', 'overview');
@@ -258,6 +263,54 @@ export function TruthMonitorPage() {
     setSessionsRefreshTick((prev) => prev + 1);
   }, [autoFollow, pipelineSessionId, sessionId, setStoredSession, navigate]);
 
+  // Process events for notifications
+  useEffect(() => {
+    if (events.length === 0) return;
+    const latestEvent = events[events.length - 1];
+    if (latestEvent) {
+      // Extract agent name from session context if available
+      const agentName = summary?.tenant || 'Agent';
+      processEventNotification(latestEvent, agentName);
+    }
+  }, [events, summary?.tenant]);
+
+  // Calculate real-time metrics from actual data
+  const realtimeMetrics = useMemo(() => {
+    const totalValidations = events.filter(e => e.type === 'eye_update').length;
+    const successfulValidations = events.filter(e => e.type === 'eye_update' && e.ok === true).length;
+    const failedValidations = events.filter(e => e.type === 'eye_update' && e.ok === false).length;
+
+    const successRate = totalValidations > 0 ? (successfulValidations / totalValidations) * 100 : 0;
+
+    // Calculate average response time from events with timestamps
+    const recentEvents = events.slice(-10).filter(e => e.ts);
+    let avgResponseTime = 0;
+    if (recentEvents.length > 1) {
+      const timeDiffs = recentEvents.slice(1).map((event, i) => {
+        const current = new Date(event.ts!).getTime();
+        const previous = new Date(recentEvents[i].ts!).getTime();
+        return current - previous;
+      });
+      avgResponseTime = timeDiffs.reduce((sum, diff) => sum + diff, 0) / timeDiffs.length;
+    }
+
+    return {
+      totalValidations,
+      successfulValidations,
+      failedValidations,
+      successRate,
+      avgResponseTime: Math.round(avgResponseTime / 1000), // Convert to seconds
+      activeEyes: Object.keys(eyes).filter(eye => eyes[eye]?.ok === null).length
+    };
+  }, [events, eyes]);
+
+  // Get last event time for connection status
+  const lastEventTime = useMemo(() => {
+    if (events.length === 0) return undefined;
+    const latestEvent = events[events.length - 1];
+    return latestEvent?.ts ? new Date(latestEvent.ts) : undefined;
+  }, [events]);
+
   return (
     <div className="mx-auto max-w-6xl space-y-8 px-6 pb-12">
       <HeroRibbon
@@ -292,7 +345,76 @@ export function TruthMonitorPage() {
         onAutoFollowChange={setAutoFollow}
       />
 
-      {pipelineError && <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200">{pipelineError}</p>}
+      {/* WebSocket Status */}
+      <WebSocketStatus
+        connected={connected}
+        connectionAttempts={connectionAttempts}
+        lastEventTime={lastEventTime}
+      />
+
+      {/* Real-time Metrics Dashboard */}
+      {sessionId && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <MetricCard
+            title="Total Validations"
+            value={realtimeMetrics.totalValidations}
+            icon="🔍"
+            description="Validations processed in this session"
+            isLoading={summaryLoading}
+          />
+          <MetricCard
+            title="Success Rate"
+            value={realtimeMetrics.successRate.toFixed(1)}
+            suffix="%"
+            icon="✅"
+            trend={realtimeMetrics.successRate > 80 ? 5 : realtimeMetrics.successRate > 60 ? 0 : -5}
+            variant={realtimeMetrics.successRate > 80 ? 'success' : realtimeMetrics.successRate > 60 ? 'warning' : 'error'}
+            description="Percentage of approved validations"
+            isLoading={summaryLoading}
+          />
+          <MetricCard
+            title="Active Eyes"
+            value={realtimeMetrics.activeEyes}
+            icon="👁️"
+            description="Eyes currently processing"
+            variant={realtimeMetrics.activeEyes > 0 ? 'warning' : 'default'}
+            isLoading={summaryLoading}
+          />
+          <MetricCard
+            title="Avg Response"
+            value={realtimeMetrics.avgResponseTime}
+            suffix="s"
+            icon="⚡"
+            description="Average validation time"
+            variant={realtimeMetrics.avgResponseTime < 5 ? 'success' : realtimeMetrics.avgResponseTime < 15 ? 'warning' : 'error'}
+            isLoading={summaryLoading}
+          />
+        </div>
+      )}
+
+      {/* Live Activity Feed and Error Display */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          {pipelineError && (
+            <div className="mb-4 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200">
+              {pipelineError}
+            </div>
+          )}
+          <LiveActivityFeed events={events} maxItems={8} />
+        </div>
+        <div className="space-y-4">
+          {/* Additional metrics or info could go here */}
+          {summary?.tenant && (
+            <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4">
+              <h3 className="text-sm font-medium text-blue-400 mb-2">Session Agent</h3>
+              <p className="text-blue-300">{summary.tenant}</p>
+              <p className="text-xs text-blue-400 mt-1">
+                Currently validating your submissions
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
 
       <nav className="mt-4 flex flex-wrap gap-2 text-xs uppercase tracking-[0.2em] text-slate-300">
         {TABS.map((tab) => (
@@ -391,6 +513,9 @@ export function TruthMonitorPage() {
         }}
         onResubmit={() => handleResubmit(whyEye)}
       />
+
+      {/* Toast Notifications */}
+      <NotificationContainer />
     </div>
   );
 }

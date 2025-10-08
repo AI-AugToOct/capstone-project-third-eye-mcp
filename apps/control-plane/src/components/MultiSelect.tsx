@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactElement } from 'react';
 import type { OptionItem } from '../types/admin';
 
 export interface MultiSelectProps {
@@ -10,11 +11,32 @@ export interface MultiSelectProps {
   allowCustom?: boolean;
   busy?: boolean;
   emptyLabel?: string;
+  showSelectAll?: boolean;
+  groupBy?: 'group' | 'none';
 }
 
 function normalise(input: string): string | null {
   const trimmed = input.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function highlightText(text: string, query: string): ReactElement {
+  if (!query) return <>{text}</>;
+
+  const parts = text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.toLowerCase() === query.toLowerCase() ? (
+          <mark key={index} className="bg-accent-primary/30 text-accent-primary rounded px-1">
+            {part}
+          </mark>
+        ) : (
+          <span key={index}>{part}</span>
+        )
+      )}
+    </>
+  );
 }
 
 export function MultiSelect({
@@ -26,6 +48,8 @@ export function MultiSelect({
   allowCustom = false,
   busy = false,
   emptyLabel = 'No options available',
+  showSelectAll = true,
+  groupBy = 'none',
 }: MultiSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -42,6 +66,34 @@ export function MultiSelect({
         .some((token) => token!.toLowerCase().includes(lowered)),
     );
   }, [options, query]);
+
+  const groupedOptions = useMemo(() => {
+    if (groupBy === 'none') return { ungrouped: filteredOptions };
+
+    const groups: Record<string, typeof filteredOptions> = {};
+    filteredOptions.forEach((option) => {
+      const groupKey = option.group || 'Other';
+      if (!groups[groupKey]) groups[groupKey] = [];
+      groups[groupKey].push(option);
+    });
+    return groups;
+  }, [filteredOptions, groupBy]);
+
+  const isAllSelected = useMemo(() => {
+    return filteredOptions.length > 0 && filteredOptions.every(opt => selected.includes(opt.value));
+  }, [filteredOptions, selected]);
+
+  const handleSelectAll = () => {
+    if (isAllSelected) {
+      // Deselect all filtered options
+      const newSelected = selected.filter(val => !filteredOptions.some(opt => opt.value === val));
+      onChange(newSelected);
+    } else {
+      // Select all filtered options
+      const allValues = [...new Set([...selected, ...filteredOptions.map(opt => opt.value)])];
+      onChange(allValues);
+    }
+  };
 
   const toggle = (nextValue: string) => {
     const normalised = nextValue.trim();
@@ -94,10 +146,37 @@ export function MultiSelect({
         onClick={() => setOpen((prev) => !prev)}
         className="flex w-full items-center justify-between gap-2 rounded-lg border border-surface-outline/60 bg-surface-base px-3 py-2 text-left text-sm text-slate-100 transition hover:border-accent-primary focus:outline-none focus:ring-2 focus:ring-accent-primary/40 disabled:opacity-50"
       >
-        <span className="truncate">
-          {selected.length ? `${selected.length} selected` : placeholder}
-        </span>
-        <span className="text-xs text-slate-400">{open ? '▲' : '▼'}</span>
+        <div className="flex items-center gap-2 truncate">
+          {selected.length > 0 && (
+            <span className="inline-flex items-center rounded-full bg-accent-primary/20 px-2 py-0.5 text-xs font-medium text-accent-primary">
+              {selected.length}
+            </span>
+          )}
+          <span className="truncate">
+            {selected.length ?
+              selected.length === 1
+                ? optionMap.get(selected[0])?.label || selected[0]
+                : `${selected.length} items selected`
+              : placeholder
+            }
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          {selected.length > 0 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange([]);
+              }}
+              className="rounded-full p-1 text-slate-400 hover:bg-surface-outline/20 hover:text-white"
+              disabled={disabled}
+            >
+              ✕
+            </button>
+          )}
+          <span className="text-xs text-slate-400">{open ? '▲' : '▼'}</span>
+        </div>
       </button>
 
       {open && (
@@ -134,33 +213,73 @@ export function MultiSelect({
             {busy ? (
               <p className="px-2 py-3 text-xs text-slate-400">Loading options…</p>
             ) : filteredOptions.length ? (
-              filteredOptions.map((item) => {
-                const checked = selected.includes(item.value);
-                return (
-                  <label
-                    key={item.value}
-                    className="group flex cursor-pointer items-start gap-3 rounded-lg px-2 py-2 text-sm text-slate-200 transition hover:bg-slate-800/40"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggle(item.value)}
-                      className="mt-1 h-4 w-4 rounded border border-surface-outline/50 bg-surface-base accent-accent-primary"
-                    />
-                    <span>
-                      <span className="font-medium text-white">{item.label || item.value}</span>
-                      {(item.description || item.group) && (
-                        <Fragment>
-                          <br />
-                          <span className="text-xs text-slate-400">
-                            {[item.group, item.description].filter(Boolean).join(' • ')}
+              <>
+                {/* Select All Option */}
+                {showSelectAll && filteredOptions.length > 1 && (
+                  <>
+                    <label
+                      className="group flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-sm text-slate-200 transition hover:bg-accent-primary/10 border-b border-surface-outline/30 mb-2"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isAllSelected}
+                        onChange={handleSelectAll}
+                        className="h-4 w-4 rounded border border-surface-outline/50 bg-surface-base accent-accent-primary"
+                        disabled={disabled}
+                      />
+                      <span className="font-semibold text-accent-primary">
+                        Select All ({filteredOptions.length})
+                      </span>
+                    </label>
+                  </>
+                )}
+
+                {/* Grouped Options */}
+                {Object.entries(groupedOptions).map(([groupName, groupOptions]) => (
+                  <div key={groupName}>
+                    {groupBy !== 'none' && (
+                      <div className="px-2 py-1 text-xs font-semibold text-slate-400 uppercase tracking-wide">
+                        {groupName}
+                      </div>
+                    )}
+                    {groupOptions.map((item) => {
+                      const checked = selected.includes(item.value);
+                      return (
+                        <label
+                          key={item.value}
+                          className="group flex cursor-pointer items-start gap-3 rounded-lg px-2 py-2 text-sm text-slate-200 transition hover:bg-slate-800/40"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggle(item.value)}
+                            className="mt-1 h-4 w-4 rounded border border-surface-outline/50 bg-surface-base accent-accent-primary"
+                            disabled={disabled}
+                          />
+                          <span>
+                            <span className="font-medium text-white">
+                              {highlightText(item.label || item.value, query)}
+                            </span>
+                            {(item.description || (groupBy === 'none' && item.group)) && (
+                              <Fragment>
+                                <br />
+                                <span className="text-xs text-slate-400">
+                                  {highlightText(
+                                    [groupBy === 'none' ? item.group : null, item.description]
+                                      .filter(Boolean)
+                                      .join(' • '),
+                                    query
+                                  )}
+                                </span>
+                              </Fragment>
+                            )}
                           </span>
-                        </Fragment>
-                      )}
-                    </span>
-                  </label>
-                );
-              })
+                        </label>
+                      );
+                    })}
+                  </div>
+                ))}
+              </>
             ) : (
               <p className="px-2 py-3 text-xs text-slate-500">{allowCustom && query ? 'Press Enter to add this value' : emptyLabel}</p>
             )}

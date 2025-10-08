@@ -1,23 +1,16 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
-import clsx from 'clsx';
-import { formatDistanceToNow } from 'date-fns';
+import { useEffect, useMemo, useState } from 'react';
+import type { FormEvent } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAdminStore } from '../store/adminStore';
 import type { TenantCreatePayload, TenantEntry, TenantUpdatePayload } from '../types/admin';
+import TenantCard from '../components/cards/TenantCard';
+import TenantOnboardingWizard from '../components/TenantOnboardingWizard';
 
 export interface TenantsPageProps {
   apiKey: string;
   disabled?: boolean;
 }
 
-function formatTimestamp(value?: number | null): string {
-  if (!value) return '—';
-  try {
-    return formatDistanceToNow(new Date(value * 1000), { addSuffix: true });
-  } catch (error) {
-    console.error(error);
-    return new Date(value * 1000).toLocaleString();
-  }
-}
 
 function normalizeTags(input: string): string[] {
   return Array.from(
@@ -73,68 +66,147 @@ function TenantCreateForm({ onCreate, disabled }: { onCreate: (payload: TenantCr
     }
   };
 
+  const tagPreview = normalizeTags(formState.tags);
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 rounded-2xl border border-surface-outline/60 bg-surface-raised/80 p-6 shadow-lg">
-      <header>
-        <h2 className="text-lg font-semibold text-white">Create Tenant</h2>
-        <p className="mt-1 text-sm text-slate-300">Register a new tenant to scope API keys and reporting.</p>
+    <motion.form
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      onSubmit={handleSubmit}
+      className="space-y-6 rounded-2xl border border-surface-outline/60 bg-surface-raised/80 p-6 shadow-lg"
+    >
+      <header className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+            <span>🏢</span>
+            Create Tenant
+          </h2>
+          <p className="mt-1 text-sm text-slate-300">Register a new tenant to scope API keys and reporting.</p>
+        </div>
+        <div className="text-right text-xs text-slate-400">
+          <div>New Tenant</div>
+          <div className="mt-1">Multi-tenancy Setup</div>
+        </div>
       </header>
-      <div className="grid gap-4 md:grid-cols-2">
-        <label className="flex flex-col gap-2 text-sm text-slate-200">
-          Tenant ID
+
+      <div className="grid gap-6 md:grid-cols-2">
+        <div className="space-y-2">
+          <label className="block text-sm font-medium text-white">
+            Tenant ID
+          </label>
           <input
             required
             minLength={2}
             value={formState.id}
             disabled={busy || disabled}
             onChange={(event) => setFormState((prev) => ({ ...prev, id: event.target.value }))}
-            className="rounded-lg border border-surface-outline/50 bg-surface-base px-3 py-2 text-slate-100 focus:border-accent-primary focus:outline-none focus:ring-2 focus:ring-accent-primary/50"
-            placeholder="tenant-slug"
+            className="w-full rounded-lg border border-surface-outline/50 bg-surface-base px-4 py-3 text-slate-100 focus:border-accent-primary focus:outline-none focus:ring-2 focus:ring-accent-primary/50 transition"
+            placeholder="e.g., acme-corp"
           />
-        </label>
-        <label className="flex flex-col gap-2 text-sm text-slate-200">
-          Display name
+          <p className="text-xs text-slate-400">Unique identifier (lowercase, hyphens allowed)</p>
+        </div>
+
+        <div className="space-y-2">
+          <label className="block text-sm font-medium text-white">
+            Display Name
+          </label>
           <input
             required
             minLength={2}
             value={formState.display_name}
             disabled={busy || disabled}
             onChange={(event) => setFormState((prev) => ({ ...prev, display_name: event.target.value }))}
-            className="rounded-lg border border-surface-outline/50 bg-surface-base px-3 py-2 text-slate-100 focus:border-accent-primary focus:outline-none focus:ring-2 focus:ring-accent-primary/50"
-            placeholder="Tenant Friendly Name"
+            className="w-full rounded-lg border border-surface-outline/50 bg-surface-base px-4 py-3 text-slate-100 focus:border-accent-primary focus:outline-none focus:ring-2 focus:ring-accent-primary/50 transition"
+            placeholder="e.g., Acme Corporation"
           />
-        </label>
+          <p className="text-xs text-slate-400">Human-readable name for the tenant</p>
+        </div>
       </div>
-      <label className="flex flex-col gap-2 text-sm text-slate-200">
-        Description (optional)
+
+      <div className="space-y-2">
+        <label className="block text-sm font-medium text-white">
+          Description <span className="text-slate-400 font-normal">(optional)</span>
+        </label>
         <textarea
-          rows={2}
+          rows={3}
           value={formState.description}
           disabled={busy || disabled}
           onChange={(event) => setFormState((prev) => ({ ...prev, description: event.target.value }))}
-          className="rounded-lg border border-surface-outline/50 bg-surface-base px-3 py-2 text-slate-100 focus:border-accent-primary focus:outline-none focus:ring-2 focus:ring-accent-primary/50"
-          placeholder="Notes about the tenant"
+          className="w-full rounded-lg border border-surface-outline/50 bg-surface-base px-4 py-3 text-slate-100 focus:border-accent-primary focus:outline-none focus:ring-2 focus:ring-accent-primary/50 transition resize-none"
+          placeholder="Brief description of this tenant's purpose..."
         />
-      </label>
-      <label className="flex flex-col gap-2 text-sm text-slate-200">
-        Tags (comma separated)
+        <p className="text-xs text-slate-400">Optional notes about the tenant</p>
+      </div>
+
+      <div className="space-y-2">
+        <label className="block text-sm font-medium text-white">
+          Tags <span className="text-slate-400 font-normal">(comma separated)</span>
+        </label>
         <input
           value={formState.tags}
           disabled={busy || disabled}
           onChange={(event) => setFormState((prev) => ({ ...prev, tags: event.target.value }))}
-          className="rounded-lg border border-surface-outline/50 bg-surface-base px-3 py-2 text-slate-100 focus:border-accent-primary focus:outline-none focus:ring-2 focus:ring-accent-primary/50"
-          placeholder="primary, production"
+          className="w-full rounded-lg border border-surface-outline/50 bg-surface-base px-4 py-3 text-slate-100 focus:border-accent-primary focus:outline-none focus:ring-2 focus:ring-accent-primary/50 transition"
+          placeholder="production, primary, internal"
         />
-      </label>
-      {error && <p className="text-sm text-accent-danger">{error}</p>}
-      <button
-        type="submit"
-        disabled={busy || disabled}
-        className="rounded-full bg-accent-primary px-4 py-2 text-sm font-semibold text-surface-base transition hover:bg-accent-primary/80 disabled:opacity-50"
-      >
-        {busy ? 'Creating…' : 'Create tenant'}
-      </button>
-    </form>
+        {tagPreview.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-2">
+            {tagPreview.map((tag) => (
+              <span
+                key={tag}
+                className="inline-flex items-center rounded-full bg-accent-primary/20 px-2 py-1 text-xs font-medium text-accent-primary"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-slate-400">Categorize this tenant with tags</p>
+      </div>
+
+      {error && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-lg border border-red-500/50 bg-red-500/10 p-4 text-sm text-red-200"
+        >
+          <div className="flex items-center gap-2">
+            <span>❌</span>
+            <span>{error}</span>
+          </div>
+        </motion.div>
+      )}
+
+      <div className="flex items-center justify-between pt-4 border-t border-surface-outline/30">
+        <div className="text-xs text-slate-400">
+          <div>💡 Tip: Use descriptive tenant IDs</div>
+          <div className="mt-1">They'll be used in API keys and logs</div>
+        </div>
+
+        <button
+          type="submit"
+          disabled={busy || disabled || !formState.id.trim() || !formState.display_name.trim()}
+          className="inline-flex items-center gap-2 rounded-full bg-accent-primary px-6 py-3 text-sm font-semibold text-surface-base transition hover:bg-accent-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {busy ? (
+            <>
+              <motion.span
+                animate={{ rotate: 360 }}
+                transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+              >
+                ⚙️
+              </motion.span>
+              Creating…
+            </>
+          ) : (
+            <>
+              <span>🏢</span>
+              Create Tenant
+            </>
+          )}
+        </button>
+      </div>
+    </motion.form>
   );
 }
 
@@ -265,6 +337,7 @@ export function TenantsPage({ apiKey, disabled = false }: TenantsPageProps) {
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState<string | null>(null);
   const [editingTenant, setEditingTenant] = useState<TenantEntry | null>(null);
+  const [showWizard, setShowWizard] = useState(false);
 
   useEffect(() => {
     if (!apiKey) return;
@@ -283,6 +356,7 @@ export function TenantsPage({ apiKey, disabled = false }: TenantsPageProps) {
     if (!apiKey || disabled) return;
     await createTenant(apiKey, payload);
     await fetchTenants(apiKey, { includeArchived, search });
+    setShowWizard(false);
   };
 
   const handleUpdate = async (tenantId: string, payload: TenantUpdatePayload) => {
@@ -311,11 +385,22 @@ export function TenantsPage({ apiKey, disabled = false }: TenantsPageProps) {
     <div className="space-y-6">
       <section className="rounded-2xl border border-surface-outline/60 bg-surface-raised/70 p-6 shadow-lg">
         <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-white">Tenant Directory</h2>
-            <p className="text-sm text-slate-300">Track tenant health, key usage, and lifecycle status.</p>
+          <div className="flex items-center justify-between w-full md:w-auto">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Tenant Directory</h2>
+              <p className="text-sm text-slate-300">Track tenant health, key usage, and lifecycle status.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowWizard(true)}
+              disabled={disabled}
+              className="md:hidden rounded-full bg-accent-primary px-4 py-2 text-sm font-semibold text-surface-base transition hover:bg-accent-primary/90 disabled:opacity-50"
+            >
+              + New
+            </button>
           </div>
-          <form onSubmit={handleSearchSubmit} className="flex flex-wrap items-center gap-3 text-sm text-slate-200">
+          <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+            <form onSubmit={handleSearchSubmit} className="flex flex-wrap items-center gap-3 text-sm text-slate-200">
             <input
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
@@ -341,92 +426,106 @@ export function TenantsPage({ apiKey, disabled = false }: TenantsPageProps) {
               Filter
             </button>
           </form>
+            <button
+              type="button"
+              onClick={() => setShowWizard(true)}
+              disabled={disabled}
+              className="hidden md:inline-flex rounded-full bg-accent-primary px-6 py-2 text-sm font-semibold text-surface-base transition hover:bg-accent-primary/90 disabled:opacity-50"
+            >
+              + New Tenant
+            </button>
+          </div>
         </header>
         {loadingTenants ? (
-          <p className="mt-6 text-sm text-slate-300">Loading tenants…</p>
-        ) : sortedTenants.length === 0 ? (
-          <p className="mt-6 text-sm text-slate-300">No tenants discovered yet.</p>
-        ) : (
-          <div className="mt-6 overflow-hidden rounded-xl border border-surface-outline/50">
-            <table className="min-w-full divide-y divide-surface-outline/60 text-sm">
-              <thead className="bg-surface-base/80 text-xs uppercase tracking-[0.2em] text-slate-400">
-                <tr>
-                  <th className="px-4 py-3 text-left">Display</th>
-                  <th className="px-4 py-3 text-left">Tenant ID</th>
-                  <th className="px-4 py-3 text-left">Status</th>
-                  <th className="px-4 py-3 text-left">Active Keys</th>
-                  <th className="px-4 py-3 text-left">Total Keys</th>
-                  <th className="px-4 py-3 text-left">Last Rotation</th>
-                  <th className="px-4 py-3 text-left">Last Activity</th>
-                  <th className="px-4 py-3 text-left">Tags</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-surface-outline/60 text-slate-200">
-                {sortedTenants.map((tenant) => {
-                  const archived = Boolean(tenant.archived_at);
-                  return (
-                    <tr key={tenant.id} className={clsx(archived && 'bg-red-900/20')}>
-                      <td className="px-4 py-3 font-semibold text-white">{tenant.display_name}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-300">{tenant.id}</td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={clsx(
-                            'inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold',
-                            archived ? 'bg-accent-danger/30 text-accent-danger' : 'bg-accent-success/20 text-accent-success',
-                          )}
-                        >
-                          {archived ? 'Archived' : 'Active'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-slate-200">{tenant.active_keys}</td>
-                      <td className="px-4 py-3 text-slate-200">{tenant.total_keys}</td>
-                      <td className="px-4 py-3 text-slate-300">{formatTimestamp(tenant.last_key_rotated_at)}</td>
-                      <td className="px-4 py-3 text-slate-300">{formatTimestamp(tenant.last_key_used_at)}</td>
-                      <td className="px-4 py-3 text-slate-300 text-xs">
-                        {tenant.tags.length ? tenant.tags.join(', ') : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setEditingTenant(tenant)}
-                            disabled={disabled}
-                            className="rounded-full border border-surface-outline/60 px-3 py-1 text-xs text-slate-200 transition hover:border-accent-primary hover:text-accent-primary disabled:opacity-50"
-                          >
-                            Edit
-                          </button>
-                          {archived ? (
-                            <button
-                              type="button"
-                              onClick={() => handleRestore(tenant.id)}
-                              disabled={disabled}
-                              className="rounded-full border border-accent-success/40 px-3 py-1 text-xs text-accent-success transition hover:bg-accent-success/10 disabled:opacity-50"
-                            >
-                              Restore
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleArchive(tenant.id)}
-                              disabled={disabled}
-                              className="rounded-full border border-accent-danger/40 px-3 py-1 text-xs text-accent-danger transition hover:bg-accent-danger/10 disabled:opacity-50"
-                            >
-                              Archive
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <motion.div
+                key={index}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.1 }}
+                className="h-64 rounded-2xl border border-surface-outline/40 bg-surface-raised/80 p-6 animate-pulse"
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="h-10 w-10 rounded-full bg-slate-600/40" />
+                  <div className="space-y-2">
+                    <div className="h-4 w-24 rounded bg-slate-600/40" />
+                    <div className="h-3 w-16 rounded bg-slate-600/40" />
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <div className="h-3 w-full rounded bg-slate-600/40" />
+                  <div className="h-3 w-3/4 rounded bg-slate-600/40" />
+                  <div className="grid grid-cols-2 gap-4 mt-4">
+                    <div className="h-12 rounded bg-slate-600/40" />
+                    <div className="h-12 rounded bg-slate-600/40" />
+                  </div>
+                </div>
+              </motion.div>
+            ))}
           </div>
+        ) : sortedTenants.length === 0 ? (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-6 text-center py-16"
+          >
+            <div className="text-7xl mb-6 opacity-40">🏢</div>
+            <h3 className="text-2xl font-bold text-white mb-3">
+              {search ? 'No Matching Tenants' : 'No Tenants Yet'}
+            </h3>
+            <p className="text-sm text-slate-400 mb-8 max-w-md mx-auto">
+              {search
+                ? 'No tenants match your search criteria. Try adjusting your filters or search terms.'
+                : 'Set up your first tenant to enable multi-tenancy features, isolated reporting, and per-tenant API key management.'}
+            </p>
+            {!search && (
+              <div className="space-y-6 max-w-md mx-auto">
+                <div className="grid grid-cols-2 gap-4 text-left text-xs text-slate-500">
+                  <div className="space-y-2">
+                    <p>✓ Isolated API key scopes</p>
+                    <p>✓ Per-tenant usage tracking</p>
+                  </div>
+                  <div className="space-y-2">
+                    <p>✓ Custom quota limits</p>
+                    <p>✓ Tenant-specific audit trails</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => document.getElementById('tenant-create-form')?.scrollIntoView({ behavior: 'smooth' })}
+                  className="inline-flex items-center gap-2 rounded-full bg-accent-primary px-6 py-3 text-sm font-semibold text-surface-base transition hover:bg-accent-primary/90"
+                >
+                  Create First Tenant
+                </button>
+              </div>
+            )}
+          </motion.div>
+        ) : (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3"
+          >
+            <AnimatePresence mode="popLayout">
+              {sortedTenants.map((tenant) => (
+                <TenantCard
+                  key={tenant.id}
+                  tenant={tenant}
+                  onEdit={() => setEditingTenant(tenant)}
+                  onArchive={() => handleArchive(tenant.id)}
+                  onRestore={() => handleRestore(tenant.id)}
+                  disabled={disabled}
+                />
+              ))}
+            </AnimatePresence>
+          </motion.div>
         )}
       </section>
 
-      <TenantCreateForm onCreate={handleCreate} disabled={disabled || !apiKey} />
+      <div id="tenant-create-form">
+        <TenantCreateForm onCreate={handleCreate} disabled={disabled || !apiKey} />
+      </div>
 
       {editingTenant && (
         <TenantEditDrawer
@@ -434,6 +533,14 @@ export function TenantsPage({ apiKey, disabled = false }: TenantsPageProps) {
           disabled={disabled || !apiKey}
           onClose={() => setEditingTenant(null)}
           onSave={handleUpdate}
+        />
+      )}
+
+      {showWizard && (
+        <TenantOnboardingWizard
+          onComplete={handleCreate}
+          onCancel={() => setShowWizard(false)}
+          disabled={disabled || !apiKey}
         />
       )}
 
