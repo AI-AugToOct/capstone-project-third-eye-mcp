@@ -39,12 +39,12 @@ class GroqModels(BaseModel):
     }
 
     @model_validator(mode="after")
-    def _ensure_required_keys(cls, values: "GroqModels") -> "GroqModels":
-        missing = cls.REQUIRED_KEYS - set(values.tools.keys())
+    def _ensure_required_keys(self) -> "GroqModels":
+        missing = self.REQUIRED_KEYS - set(self.tools.keys())
         if missing:
             missing_keys = ", ".join(sorted(missing))
             raise ValueError(f"Missing Groq model mappings: {missing_keys}")
-        return values
+        return self
 
     def get(self, tool: str) -> ModelMapping:
         if tool not in self.tools:
@@ -128,10 +128,10 @@ class PostgresCfg(BaseModel):
     model_config = {"extra": "forbid"}
 
     @model_validator(mode="after")
-    def _validate_pool_bounds(cls, values: "PostgresCfg") -> "PostgresCfg":
-        if values.pool_min_size > values.pool_max_size:
+    def _validate_pool_bounds(self) -> "PostgresCfg":
+        if self.pool_min_size > self.pool_max_size:
             raise ValueError("postgres.pool_min_size cannot exceed pool_max_size")
-        return values
+        return self
 
 
 class RedisCfg(BaseModel):
@@ -150,12 +150,12 @@ class RedisCfg(BaseModel):
     model_config = {"extra": "forbid"}
 
     @model_validator(mode="after")
-    def _validate_endpoint(cls, values: "RedisCfg") -> "RedisCfg":
-        has_host = bool(values.host and values.port)
-        has_env_url = bool(values.url_env)
+    def _validate_endpoint(self) -> "RedisCfg":
+        has_host = bool(self.host and self.port)
+        has_env_url = bool(self.url_env)
         if not (has_host or has_env_url):
             raise ValueError("redis configuration requires either host/port or url_env")
-        return values
+        return self
 
 
 class SqliteCfg(BaseModel):

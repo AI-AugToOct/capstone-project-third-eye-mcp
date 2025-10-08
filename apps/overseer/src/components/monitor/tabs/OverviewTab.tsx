@@ -1,6 +1,7 @@
 import Leaderboards from '../../Leaderboards';
 import PlanRenderer from '../../PlanRenderer';
 import ExportBar from '../../ExportBar';
+import { EyePerformanceChart, StatusDistributionChart } from '../../ValidationChart';
 import type { SessionSummary } from '../../../types/pipeline';
 
 export interface OverviewTabProps {
@@ -13,6 +14,21 @@ export interface OverviewTabProps {
 
 export function OverviewTab({ summary, sessionId, apiKey, latestPlanMd, loading = false }: OverviewTabProps) {
   const showSkeleton = loading && !summary;
+
+  // Calculate chart data from session summary
+  const chartData = summary?.hero_metrics ? {
+    statusData: [
+      { name: 'Approved', value: summary.hero_metrics.approvals || 0, color: '#10b981' },
+      { name: 'Rejected', value: summary.hero_metrics.rejections || 0, color: '#ef4444' },
+      { name: 'Blockers', value: summary.hero_metrics.open_blockers || 0, color: '#f59e0b' }
+    ],
+    performanceData: summary.eyes?.map((eye) => ({
+      eye: eye.eye,
+      approvals: eye.ok === true ? 1 : 0,
+      rejections: eye.ok === false ? 1 : 0,
+      avg_response_ms: 150 // Default response time, should come from backend
+    })) || []
+  } : null;
 
   return (
     <div className="space-y-6">
@@ -49,6 +65,28 @@ export function OverviewTab({ summary, sessionId, apiKey, latestPlanMd, loading 
           <p className="mt-2 text-xs text-slate-400">Summary data will appear once the stream is active.</p>
         )}
       </section>
+
+      {/* Validation Analytics */}
+      {chartData && !showSkeleton && (
+        <section className="grid gap-6 lg:grid-cols-2">
+          <div className="rounded-2xl border border-surface-outline/40 bg-surface-raised/80 p-6">
+            <h3 className="text-lg font-semibold text-white mb-4">Validation Overview</h3>
+            <StatusDistributionChart
+              data={chartData.statusData}
+              height={280}
+              isLoading={false}
+            />
+          </div>
+          <div className="rounded-2xl border border-surface-outline/40 bg-surface-raised/80 p-6">
+            <h3 className="text-lg font-semibold text-white mb-4">Eye Performance Timeline</h3>
+            <EyePerformanceChart
+              data={chartData.performanceData}
+              height={280}
+              isLoading={false}
+            />
+          </div>
+        </section>
+      )}
 
       {sessionId && apiKey && !showSkeleton && <Leaderboards sessionId={sessionId} apiKey={apiKey} />}
 

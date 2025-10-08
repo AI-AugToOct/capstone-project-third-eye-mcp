@@ -9,17 +9,21 @@ export interface SecretBannerProps {
 export function SecretBanner({ secret, onDismiss }: SecretBannerProps) {
   const [copied, setCopied] = useState(false);
   const [copiedCurl, setCopiedCurl] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
     if (!secret) {
       setCopied(false);
       setCopiedCurl(false);
+      setConfirming(false);
     }
   }, [secret]);
 
   if (!secret) return null;
 
-  const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'https://your-control-plane-domain';
+  const origin = typeof window !== 'undefined' && window.location?.origin
+    ? window.location.origin
+    : import.meta.env.VITE_CONTROL_PLANE_BASE_URL || 'https://your-control-plane-domain';
   const curlCommand = `curl -H "X-API-Key: ${secret.secret}" ${origin}/admin/metrics/overview`;
 
   const downloadJson = () => {
@@ -76,13 +80,29 @@ export function SecretBanner({ secret, onDismiss }: SecretBannerProps) {
           >
             Download JSON
           </button>
-          <button
-            type="button"
-            onClick={onDismiss}
-            className="rounded-full border border-surface-outline/60 px-4 py-2 text-xs text-slate-200 transition hover:border-accent-primary hover:text-accent-primary"
-          >
-            Dismiss
-          </button>
+          {!confirming ? (
+            <button
+              type="button"
+              onClick={() => setConfirming(true)}
+              className="rounded-full border border-surface-outline/60 px-4 py-2 text-xs text-slate-200 transition hover:border-accent-danger hover:text-accent-danger"
+            >
+              Dismiss
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm('⚠️ Are you sure? This secret will be lost forever once dismissed. Have you saved it?')) {
+                  onDismiss();
+                } else {
+                  setConfirming(false);
+                }
+              }}
+              className="rounded-full border border-accent-danger/60 bg-accent-danger/10 px-4 py-2 text-xs font-semibold text-accent-danger transition hover:bg-accent-danger/20"
+            >
+              Confirm Dismiss
+            </button>
+          )}
         </div>
       </div>
       <p className="mt-3 text-xs text-slate-300">Secrets are shown only once. Store it in your vault before leaving this page.</p>

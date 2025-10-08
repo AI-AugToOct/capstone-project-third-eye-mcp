@@ -114,8 +114,8 @@ export function usePipelineWS(options: {
 
     const connect = () => {
       if (cancelled) return;
-      const wsUrl = buildWebSocketUrl(sessionId, apiKey);
-      const socket = new WebSocket(wsUrl);
+      const { url, protocols } = buildWebSocketUrl(sessionId, apiKey);
+      const socket = protocols ? new WebSocket(url, protocols) : new WebSocket(url);
 
       socketRef.current = socket;
 

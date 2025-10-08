@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import clsx from 'clsx';
+import { buildBaseUrl } from '../lib/api';
 
 async function launchDuel(sessionId: string, apiKey: string, agents: string[]): Promise<Response> {
-  const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') || 'http://localhost:8000';
+  const base = buildBaseUrl();
   return fetch(`${base}/session/${encodeURIComponent(sessionId)}/duel`, {
     method: 'POST',
     headers: {

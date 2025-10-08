@@ -1,7 +1,8 @@
 import clsx from 'clsx';
+import { buildBaseUrl } from '../lib/api';
 
 async function requestExport(sessionId: string, apiKey: string, format: 'pdf' | 'html') {
-  const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') || 'http://localhost:8000';
+  const base = buildBaseUrl();
   const response = await fetch(`${base}/session/${encodeURIComponent(sessionId)}/export?format=${format}`, {
     method: 'POST',
     headers: {

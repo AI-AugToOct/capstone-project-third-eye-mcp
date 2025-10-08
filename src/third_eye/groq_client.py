@@ -25,18 +25,19 @@ class GroqClient:
     ) -> None:
         self._base_url = (base_url or CONFIG.groq.base_url).rstrip("/")
         self._api_key = api_key or os.getenv("GROQ_API_KEY")
-        if not self._api_key:
-            raise RuntimeError("GROQ_API_KEY is required in the environment")
         self._timeout = timeout or CONFIG.timeouts.default_seconds
         self._defaults = CONFIG.groq.inference_defaults
         self._retry_attempts = CONFIG.retries.max_attempts
         self._backoff_seconds = CONFIG.timeouts.retry_backoff_seconds
+
+        # Allow bootstrap without API key, but fail on actual usage
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
-            headers={
-                "Authorization": f"Bearer {self._api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
             timeout=self._timeout,
         )
 
@@ -44,6 +45,8 @@ class GroqClient:
         await self._client.aclose()
 
     async def list_models(self) -> list[str]:
+        if not self._api_key:
+            raise RuntimeError("GROQ_API_KEY is required for API operations")
         response = await self._client.get("/models")
         response.raise_for_status()
         data = response.json()
@@ -58,6 +61,8 @@ class GroqClient:
         force_json: bool | None = None,
         max_output_tokens: int | None = None,
     ) -> str:
+        if not self._api_key:
+            raise RuntimeError("GROQ_API_KEY is required for API operations")
         payload: Dict[str, Any] = {
             "model": model,
             "messages": messages,
@@ -116,11 +121,45 @@ class GroqClient:
             raise RuntimeError("Failed to contact Groq API") from exc
 
 
+_groq_instance: GroqClient | None = None
+
+
+def get_groq_client() -> GroqClient:
+    """Get or create the global Groq client instance."""
+    global _groq_instance
+    if _groq_instance is None:
+        _groq_instance = GroqClient()
+    return _groq_instance
+
+
+def reset_groq_client() -> None:
+    """Reset the global Groq client instance (useful after key updates)."""
+    global _groq_instance
+    if _groq_instance is not None:
+        # Don't await here - just set to None, old instance will be cleaned up
+        _groq_instance = None
+
+
 async def shutdown_groq_client() -> None:
-    await GROQ.close()
+    """Shutdown the global Groq client if it exists."""
+    global _groq_instance
+    if _groq_instance is not None:
+        await _groq_instance.close()
+        _groq_instance = None
 
 
-GROQ = GroqClient()
+# Backward compatibility - will be lazy-initialized on first access
+class _GroqSingleton:
+    def __getattr__(self, name):
+        return getattr(get_groq_client(), name)
+
+    async def __aenter__(self):
+        return await get_groq_client().__aenter__()
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        return await get_groq_client().__aexit__(exc_type, exc_val, exc_tb)
+
+GROQ = _GroqSingleton()
 
 
-__all__ = ["GROQ", "GroqClient", "shutdown_groq_client"]
+__all__ = ["get_groq_client", "reset_groq_client", "GroqClient", "shutdown_groq_client", "GROQ"]

@@ -111,6 +111,30 @@ async def emit_settings_event(*, session_id: str, settings: dict[str, Any]) -> N
     await PIPELINE_BUS.broadcast(session_id, payload)
 
 
+async def emit_progress_event(
+    *,
+    session_id: str,
+    stage: str,
+    message: str,
+    progress: float,
+    total_stages: int | None = None,
+    current_stage: int | None = None,
+) -> None:
+    if not session_id:
+        return
+    payload = {
+        "type": "orchestration_progress",
+        "session_id": session_id,
+        "stage": stage,
+        "message": message,
+        "progress": progress,
+        "total_stages": total_stages,
+        "current_stage": current_stage,
+        "ts": _serialize_timestamp(time.time()),
+    }
+    await PIPELINE_BUS.broadcast(session_id, payload)
+
+
 async def emit_custom_event(
     *,
     session_id: str,

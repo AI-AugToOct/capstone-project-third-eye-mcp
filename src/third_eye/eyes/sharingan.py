@@ -20,6 +20,7 @@ from ..constants import (
     Heading,
     NEWLINE,
     NextAction,
+    PersonaKey,
     SHARINGAN_AMBIGUITY_SUFFIX,
     SHARINGAN_CODE_ACTION_KEYWORDS,
     SHARINGAN_CODE_ARTIFACT_KEYWORDS,
@@ -31,12 +32,13 @@ from ..constants import (
     SHARINGAN_POLICY_TEMPLATE,
     SHARINGAN_READY_SUFFIX,
     StatusCode,
+    ToolName,
 )
 from ..examples import EXAMPLE_SHARINGAN
 from ..schemas import EyeResponse, SharinganRequest
 import asyncio
 
-from ._shared import build_response, execute_eye, execute_eye_async
+from ._shared import build_response, execute_eye, execute_eye_async, build_llm_response_async
 
 _EXAMPLE_REQUEST = EXAMPLE_SHARINGAN
 
@@ -45,7 +47,7 @@ async def clarify_async(raw: Dict[str, Any]) -> Dict[str, Any]:
     return await execute_eye_async(
         tag=EyeTag.SHARINGAN,
         model=SharinganRequest,
-        handler=_handle,
+        handler=_handle_async,
         raw=raw,
         example=_EXAMPLE_REQUEST,
     )
@@ -267,7 +269,31 @@ def _resolve_threshold(request: SharinganRequest) -> float:
     return max(0.0, min(1.0, value))
 
 
-def _handle(request: SharinganRequest) -> EyeResponse:
+async def _handle_async(request: SharinganRequest) -> EyeResponse:
+    """LLM-powered Sharingan analysis using the Sharingan persona."""
+    prompt = request.payload.prompt
+    lang = request.payload.lang if hasattr(request.payload, 'lang') else "auto"
+
+    # Use LLM with Sharingan persona for intelligent analysis
+    try:
+        llm_response = await build_llm_response_async(
+            tag=EyeTag.SHARINGAN,
+            tool=ToolName.SHARINGAN_CLARIFY,
+            persona=PersonaKey.SHARINGAN,
+            payload={
+                "prompt": prompt,
+                "lang": lang,
+                "context": request.context.model_dump() if request.context else None
+            }
+        )
+        return llm_response
+    except Exception as e:
+        LOG.error(f"Sharingan LLM call failed: {e}")
+        raise RuntimeError(f"Sharingan requires LLM - no heuristic fallback. Error: {e}") from e
+
+
+def _handle_fallback(request: SharinganRequest) -> EyeResponse:
+    """Fallback to heuristic analysis if LLM fails."""
     prompt = request.payload.prompt
     threshold = _resolve_threshold(request)
     score, ambiguous, x = _ambiguity_score(prompt, threshold)
@@ -297,6 +323,16 @@ def _handle(request: SharinganRequest) -> EyeResponse:
         next_action=_next_action(ambiguous=ambiguous, is_code_related=is_code_related),
     )
     return response
+
+
+def _handle(request: SharinganRequest) -> EyeResponse:
+    """Synchronous wrapper that uses async LLM analysis."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_handle_async(request))
+
+    raise RuntimeError("Sharingan cannot be called from within async context - use clarify_async() instead")
 
 
 __all__ = ["clarify", "clarify_async"]

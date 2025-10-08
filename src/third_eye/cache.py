@@ -41,14 +41,12 @@ async def get_redis() -> aioredis.Redis:
     global _REDIS_CLIENT
     if _REDIS_CLIENT is None:
         url = _build_redis_url()
-        use_tls = url.startswith("rediss://") or _CFG.use_tls
         _REDIS_CLIENT = aioredis.from_url(
             url,
             encoding=_CFG.encoding,
             decode_responses=True,
             health_check_interval=_CFG.healthcheck_seconds,
             client_name=_CFG.client_name,
-            ssl=use_tls,
         )
     return _REDIS_CLIENT
 

@@ -58,6 +58,7 @@ class StatusCode(str, Enum):
     E_INTERNAL_ERROR = "E_INTERNAL_ERROR"
     E_BUDGET_EXCEEDED = "E_BUDGET_EXCEEDED"
     E_PROMPT_GUARD = "E_PROMPT_GUARD"
+    E_ORCHESTRATION_FAILED = "E_ORCHESTRATION_FAILED"
 
 
 class EyeTag(str, Enum):
@@ -127,6 +128,7 @@ TOOL_TO_EYE: Final[dict[str, EyeTag]] = {
 
 
 class PersonaKey(str, Enum):
+    OVERSEER = "overseer"
     SHARINGAN = "sharingan"
     PROMPT_HELPER = "prompt_helper"
     JOGAN = "jogan"
@@ -138,6 +140,7 @@ class PersonaKey(str, Enum):
 
 class DataKey(str, Enum):
     SCORE = "score"
+    AMBIGUITY_SCORE = "score"
     AMBIGUOUS = "ambiguous"
     QUESTIONS_MD = "questions_md"
     POLICY_MD = "policy_md"

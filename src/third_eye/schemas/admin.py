@@ -320,6 +320,19 @@ class EnvironmentSettingsUpdateRequest(BaseModel):
     observability: EnvironmentObservability | None = None
 
 
+class ProviderConfigRequest(BaseModel):
+    api_key: str
+    test_connection: bool = False
+
+
+class ProviderConfigResponse(BaseModel):
+    provider: str
+    configured: bool
+    connection_test: bool | None = None
+    models_available: int | None = None
+    last_updated: float | None = None
+
+
 __all__ = [
     "APIKeyCreateRequest",
     "APIKeyRotateResponse",
@@ -345,4 +358,6 @@ __all__ = [
     "PersonaPromptPublishRequest",
     "PersonaSummary",
     "PersonaCatalogResponse",
+    "ProviderConfigRequest",
+    "ProviderConfigResponse",
 ]

@@ -1,24 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
-import clsx from 'clsx';
 import type { SessionSettingsPayload, SessionOverview } from '../types/pipeline';
+import { StatusBadge } from './shared';
 
 function formatTimestamp(value: string | null | undefined): string {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
-}
-
-function sessionStatusTone(status: SessionOverview['status']): string {
-  switch (status) {
-    case 'approved':
-      return 'bg-emerald-500/20 text-emerald-200 border border-emerald-400/40';
-    case 'blocked':
-      return 'bg-rose-500/20 text-rose-200 border border-rose-400/40';
-    default:
-      return 'bg-slate-500/20 text-slate-200 border border-slate-400/30';
-  }
 }
 
 function sessionStatusLabel(status: SessionOverview['status']): string {
@@ -134,9 +123,10 @@ export function SessionHeader({
           </p>
         </div>
         <div className="flex flex-col items-end gap-2 text-xs">
-          <span className={clsx('rounded-full border px-3 py-1 font-medium', connected ? 'border-emerald-400/50 text-emerald-300' : 'border-rose-400/60 text-rose-300')}>
-            {connected ? 'Realtime Connected' : 'Disconnected'}
-          </span>
+          <StatusBadge
+            status={connected ? 'active' : 'error'}
+            label={connected ? 'Realtime Connected' : 'Disconnected'}
+          />
           {connectionAttempts > 0 && (
             <span className="text-slate-400">Retries: {connectionAttempts}</span>
           )}
@@ -198,9 +188,10 @@ export function SessionHeader({
                 <div>
                   <dt className="uppercase tracking-[0.2em] text-slate-500">Status</dt>
                   <dd>
-                    <span className={clsx('inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-semibold', sessionStatusTone(sessionMeta.status))}>
-                      {sessionStatusLabel(sessionMeta.status)}
-                    </span>
+                    <StatusBadge
+                      status={sessionMeta.status === 'approved' ? 'success' : sessionMeta.status === 'blocked' ? 'error' : 'pending'}
+                      label={sessionStatusLabel(sessionMeta.status)}
+                    />
                   </dd>
                 </div>
                 <div>

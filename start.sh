@@ -280,6 +280,7 @@ log_info() { log info "$1"; }
 log_docker() { log docker "$1"; }
 log_action() { log gear "$1"; }
 log_hint() { log book "$1"; }
+log_key() { log key "$1"; }
 
 pause() {
   if [[ -t 0 ]]; then
@@ -326,22 +327,48 @@ detect_os() {
 print_banner() {
   local os
   os=$(detect_os)
+  local first_run=false
+
+  # Detect first run
+  if [[ ! -f "$ENV_FILE" ]] || [[ ! -s "$ENV_FILE" ]]; then
+    first_run=true
+  fi
+
   print_line
   print_centered_line "╭────────────────────────────────────────────╮" cyan
   print_centered_line "│          👁️  THIRD EYE CONTROL ROOM          │" cyan
-  print_centered_line "│     Unified Launchpad for MCP Explorers     │" cyan
+  if [[ "$first_run" == true ]]; then
+    print_centered_line "│        🔰 First-Time Setup Guide 🔰         │" cyan
+  else
+    print_centered_line "│     Unified Launchpad for MCP Explorers     │" cyan
+  fi
   print_centered_line "╰────────────────────────────────────────────╯" cyan
   printf '\n'
+
+  if [[ "$first_run" == true ]]; then
+    print_centered_line "🎉 Welcome to Third Eye! Let's get you started..." green
+    printf '\n'
+    print_centered_line "📋 Quick setup checklist:" dim
+    print_centered_line "   1. Get a free GROQ API key (takes 2 minutes)" dim
+    print_centered_line "   2. Run './start.sh start' - we'll guide you!" dim
+    print_centered_line "   3. System auto-generates admin credentials" dim
+    printf '\n'
+  fi
+
   print_centered_line "Workspace: $PROJECT_ROOT" dim
   print_centered_line "Host OS: $os" dim
   if [[ -n "${GROQ_API_KEY:-}" ]]; then
-    print_centered_line "GROQ key detected" dim
+    print_centered_line "GROQ key: ✅ configured" green
   else
-    print_centered_line "GROQ key missing" dim
+    print_centered_line "GROQ key: ⚠️  missing" yellow
   fi
   printf '\n'
-  print_centered_line "Welcome! This guided launcher installs prereqs, collects secrets," cyan
-  print_centered_line "and orchestrates the full Third Eye stack for you." cyan
+
+  if [[ "$first_run" == true ]]; then
+    print_centered_line "🚀 Ready to launch? Choose option 1 to start!" cyan
+  else
+    print_centered_line "Welcome back! This guided launcher manages your Third Eye stack." cyan
+  fi
   printf '\n'
   print_centered_line "Legend:" dim
   print_centered_line "$ICON_CHECK  Success   $ICON_WARN  Needs attention" dim
@@ -367,23 +394,35 @@ prompt_yes_no() {
 
 verify_prereqs() {
   local ok=true
+
   if ! command -v docker >/dev/null 2>&1; then
-    log_error "Docker Desktop / CLI is not installed."
+    log_error "Docker is not installed."
+    printf '\n'
+    log_info "📥 Install Docker Desktop from: https://www.docker.com/products/docker-desktop/"
+    log_info "💡 Tip: Docker Desktop includes everything you need (Docker + Compose)"
     ok=false
   fi
 
   if $ok && ! docker info >/dev/null 2>&1; then
-    log_error "Docker daemon is not running. Please start Docker Desktop."
+    log_error "Docker daemon is not running."
+    printf '\n'
+    log_info "🚀 Please start Docker Desktop and wait for it to be ready"
+    log_info "💡 Look for the green whale icon in your system tray/menu bar"
     ok=false
   fi
 
   if $ok && ! docker compose version >/dev/null 2>&1; then
-    log_error "Docker Compose plugin is missing. Update Docker Desktop or install compose."
+    log_error "Docker Compose plugin is missing."
+    printf '\n'
+    log_info "🔄 Update Docker Desktop to get the latest Compose plugin"
+    log_info "💡 Older Docker installations may need manual Compose installation"
     ok=false
   fi
 
   if ! $ok; then
-    log_hint "Open the Environment Doctor from the menu for installation tips."
+    printf '\n'
+    log_hint "🩺 Run './start.sh doctor' for detailed installation guidance"
+    log_hint "📚 Check TROUBLESHOOTING.md for step-by-step help"
     return 1
   fi
   return 0
@@ -482,6 +521,7 @@ ensure_secret() {
   local var_name=$1
   local prompt_label=$2
   local hint_url=${3:-}
+  local non_interactive=${4:-false}
 
   local current_value=${!var_name:-}
 
@@ -489,7 +529,26 @@ ensure_secret() {
     return 0
   fi
 
+  # Check if we're in non-interactive mode
+  if [[ "$non_interactive" == true ]] || [[ ! -t 0 ]] || [[ ! -t 1 ]]; then
+    log_warn "$prompt_label not found. Run './start.sh configure' to set it up."
+    return 1
+  fi
+
   log_warn "Missing $prompt_label."
+  printf '\n'
+
+  # Enhanced guidance for GROQ API key
+  if [[ "$var_name" == "GROQ_API_KEY" ]]; then
+    log_info "🤖 GROQ provides fast AI models for Third Eye's intelligence"
+    log_info "📝 Getting your key takes 2 minutes:"
+    log_info "   1. Visit https://console.groq.com/keys"
+    log_info "   2. Sign up/login (free tier available)"
+    log_info "   3. Click 'Create API Key'"
+    log_info "   4. Copy the key (starts with 'gsk_')"
+    printf '\n'
+  fi
+
   if ! prompt_yes_no "Do you want to add it now?"; then
     return 1
   fi
@@ -498,13 +557,26 @@ ensure_secret() {
   while true; do
     printf '\n'
     if [[ -n "$hint_url" ]]; then
-      log_info "Provision the credential at $hint_url"
+      log_info "Get your key at: $hint_url"
     fi
-    read -r -p "Enter $prompt_label: " key || return 1
+
+    if [[ "$var_name" == "GROQ_API_KEY" ]]; then
+      read -r -p "Paste your GROQ API key (gsk_...): " key || return 1
+    else
+      read -r -p "Enter $prompt_label: " key || return 1
+    fi
+
     if [[ -z "$key" ]]; then
       log_warn "The value cannot be empty."
       continue
     fi
+
+    # Validate GROQ API key format
+    if [[ "$var_name" == "GROQ_API_KEY" ]] && [[ ! "$key" =~ ^gsk_ ]]; then
+      log_warn "GROQ API keys start with 'gsk_'. Please check your key."
+      continue
+    fi
+
     read -r -p "Re-enter to confirm: " verify || return 1
     if [[ "$key" != "$verify" ]]; then
       log_warn "Entries do not match. Let's try again."
@@ -533,17 +605,43 @@ compose() {
 start_services() {
   local rebuild=${1:-false}
   local with_mcp=${2:-true}
+  local non_interactive=${3:-false}
 
   if ! verify_prereqs; then
     return 1
   fi
 
-  if ! ensure_groq_key; then
-    log_warn "Starting without GROQ_API_KEY. Some features may fail until you configure it."
+  # Auto-setup mode for beginners - detect missing credentials
+  local missing_groq=false
+  local has_demo_mode=false
+
+  if [[ -z "${GROQ_API_KEY:-}" ]]; then
+    missing_groq=true
+    if [[ "$non_interactive" == true ]]; then
+      log_warn "GROQ_API_KEY not found. Starting in demo mode (limited functionality)."
+      has_demo_mode=true
+    else
+      log_warn "GROQ_API_KEY not found - required for AI model operations."
+    fi
   fi
 
-  if ! ensure_platform_api_key; then
-    log_warn "Starting without THIRD_EYE_API_KEY. MCP bridge calls will fail until you configure it."
+  # THIRD_EYE_API_KEY is always auto-generated, never prompt for it during start
+  if [[ -z "${THIRD_EYE_API_KEY:-}" ]]; then
+    log_info "THIRD_EYE_API_KEY will be auto-generated during bootstrap."
+  fi
+
+  # For complete beginners, guide them through GROQ setup (but not in non-interactive mode)
+  if [[ "$missing_groq" == true ]] && [[ "$non_interactive" == false ]]; then
+    log_action "🎯 Beginner setup mode: Let's get your GROQ API key configured..."
+    if ! ensure_secret "GROQ_API_KEY" "GROQ API key" "https://console.groq.com/keys" "$non_interactive"; then
+      log_info "No problem! Starting in demo mode without GROQ key."
+      log_info "🔄 You can add your GROQ key later with: ./start.sh configure"
+      has_demo_mode=true
+    fi
+  fi
+
+  if [[ "$has_demo_mode" == true ]]; then
+    log_warn "⚡ Demo mode: AI features will be limited without GROQ API key"
   fi
 
   log_docker "Preparing containers..."
@@ -572,14 +670,142 @@ start_services() {
   fi
 
   log_success "Services running!"
-  log_info "API available at http://localhost:8000"
-  log_info "Overseer dashboard available at http://localhost:5173"
-  log_info "Control plane available at http://localhost:5174"
-  log_info "PostgreSQL available at postgresql://third_eye:third_eye@localhost:5432/third_eye"
-  log_info "Prometheus available at http://localhost:9090"
-  if [[ "$with_mcp" == true ]]; then
-    log_info "MCP bridge available at tcp://localhost:7331"
+
+  # Wait for services to be healthy before showing success
+  log_action "Waiting for services to be ready..."
+  local max_wait=120
+  local waited=0
+  local health_ok=false
+
+  while [[ $waited -lt $max_wait ]]; do
+    if curl -s http://localhost:8000/health >/dev/null 2>&1; then
+      health_ok=true
+      break
+    fi
+    sleep 2
+    waited=$((waited + 2))
+    printf "."
+  done
+  printf "\n"
+
+  if [[ "$health_ok" == true ]]; then
+    log_success "✨ Third Eye is fully operational!"
+
+    # Show beginner-friendly status with emojis
+    log_info "🌐 API available at http://localhost:8000"
+    log_info "👁️  Overseer dashboard at http://localhost:5173"
+    log_info "⚙️  Control plane at http://localhost:5174"
+    if [[ "$with_mcp" == true ]]; then
+      log_info "🔗 MCP bridge at tcp://localhost:7331"
+    fi
+
+    # Auto-extract credentials from logs if they were generated
+    log_action "Checking for auto-generated credentials..."
+    local logs_output
+    logs_output=$(compose logs third-eye-api 2>/dev/null | tail -200)
+
+    if echo "$logs_output" | grep -q "GENERATED ADMIN PASSWORD\|GENERATED API KEY"; then
+      # Extract password and API key from JSON logs
+      local admin_password
+      local admin_api_key
+      local admin_email
+
+      admin_email=$(echo "$logs_output" | grep -o 'Admin Email: [^"]*' | head -1 | sed 's/Admin Email: //' || echo "admin@third-eye.local")
+      admin_password=$(echo "$logs_output" | grep -o 'GENERATED ADMIN PASSWORD: [^"]*' | head -1 | sed 's/GENERATED ADMIN PASSWORD: //' | tr -d ',' || echo "")
+      admin_api_key=$(echo "$logs_output" | grep -o 'GENERATED API KEY: [^"]*' | head -1 | sed 's/GENERATED API KEY: //' | tr -d ',' || echo "")
+
+      # Alternative: try extracting from JSON message field
+      if [[ -z "$admin_password" ]]; then
+        admin_password=$(echo "$logs_output" | grep '"message":.*GENERATED ADMIN PASSWORD' | sed -E 's/.*GENERATED ADMIN PASSWORD: ([^"]+).*/\1/' | head -1 || echo "")
+      fi
+      if [[ -z "$admin_api_key" ]]; then
+        admin_api_key=$(echo "$logs_output" | grep '"message":.*GENERATED API KEY' | sed -E 's/.*GENERATED API KEY: ([^"]+).*/\1/' | head -1 || echo "")
+      fi
+
+      printf '\n'
+      print_line
+      print_centered_line "🔐 AUTO-GENERATED ADMIN CREDENTIALS" bold
+      print_line
+      printf '\n'
+      if [[ -n "$admin_email" ]]; then
+        log_key "Admin Email:    $admin_email"
+      fi
+      if [[ -n "$admin_password" ]]; then
+        log_key "Admin Password: $admin_password"
+      else
+        log_warn "Password not found in logs"
+        log_hint "Run './start.sh debug' or './scripts/debug-login.sh' for detailed diagnostics"
+      fi
+      if [[ -n "$admin_api_key" ]]; then
+        log_key "API Key:        $admin_api_key"
+      else
+        log_info "Waiting for API key generation..."
+        sleep 2
+        admin_api_key=$(docker compose logs third-eye-api 2>&1 | grep -o 'GENERATED API KEY: [^"]*' | head -1 | sed 's/GENERATED API KEY: //' | tr -d ',' || echo "")
+        if [[ -n "$admin_api_key" ]]; then
+          log_key "API Key:        $admin_api_key"
+        else
+          log_warn "API key still not found - it will be generated on first API use"
+      fi
+      printf '\n'
+      # Auto-save API key to .env if found
+      if [[ -n "$admin_api_key" ]]; then
+        if [[ ! -f "$ENV_FILE" ]] || ! grep -q "^THIRD_EYE_API_KEY=" "$ENV_FILE" 2>/dev/null; then
+          update_env_var "THIRD_EYE_API_KEY" "$admin_api_key"
+          log_success "✅ API key saved to .env"
+          log_info "🔄 Restarting MCP bridge to apply API key..."
+          docker compose restart mcp-bridge >/dev/null 2>&1 &
+        fi
+      fi
+
+      printf '\n'
+      log_success "✅ All credentials saved to .env automatically"
+      log_success "✅ MCP bridge configured and ready"
+      log_success "✅ No password reset required"
+      printf '\n'
+      print_line
+      print_centered_line "🌐 ACCESS URLs" bold
+      print_line
+      printf '\n'
+      log_info "Control Plane: http://localhost:5174"
+      log_info "Overseer:      http://localhost:5173"
+      log_info "API:           http://localhost:8000"
+      log_info "MCP Bridge:    tcp://localhost:7331"
+      printf '\n'
+      log_hint "💾 Credentials saved to .env"
+      log_hint "📝 Login at Control Plane: http://localhost:5174"
+
+      # Auto-save credentials to .env (no prompt in non-interactive mode)
+      if [[ -n "$admin_password" ]]; then
+        if [[ ! -f "$ENV_FILE" ]] || ! grep -q "^ADMIN_BOOTSTRAP_PASSWORD=" "$ENV_FILE" 2>/dev/null; then
+          update_env_var "ADMIN_BOOTSTRAP_PASSWORD" "$admin_password"
+          log_success "✅ Password saved to .env"
+          fi
+        fi
+      fi
+
+      if [[ -n "$admin_api_key" ]]; then
+        if [[ ! -f "$ENV_FILE" ]] || ! grep -q "^THIRD_EYE_API_KEY=" "$ENV_FILE" 2>/dev/null; then
+          if prompt_yes_no "Save API key to .env file for persistence?"; then
+            update_env_var "THIRD_EYE_API_KEY" "$admin_api_key"
+            log_success "✅ API key saved to .env"
+          fi
+        fi
+      fi
+
+      printf '\n'
+      print_line
+    else
+      # No credentials in logs - admin already exists
+      log_info "ℹ️  Admin account already exists (bootstrap skipped)"
+      log_hint "💡 Use './start.sh credentials' to view saved credentials"
+      log_hint "🔄 For a fresh start: './start.sh stop && docker compose -p third-eye-mcp down -v && ./start.sh start'"
+    fi
+
+  else
+    log_warn "Services started but health check timed out. Check logs with './start.sh logs'"
   fi
+
   if [[ "${AUTO_OPEN_PORTAL:-false}" == true ]]; then
     log_info "Launching Overseer portal..."
     launch_portal_cli
@@ -897,9 +1123,10 @@ main_menu() {
     print_centered_line "5. $ICON_INFO    Show status"
     print_centered_line "6. $ICON_DOCKER  Tail logs"
     print_centered_line "7. $ICON_KEY     Configure secrets"
-    print_centered_line "8. $ICON_BOOK    Environment doctor"
-    print_centered_line "9. $ICON_BROOM   Cleanup environment"
-    print_centered_line "10. 📡  Integration playbook"
+    print_centered_line "8. 🔐  Show admin credentials"
+    print_centered_line "9. $ICON_BOOK    Environment doctor"
+    print_centered_line "10. $ICON_BROOM   Cleanup environment"
+    print_centered_line "11. 📡  Integration playbook"
     print_centered_line "0. Exit"
     print_line
     printf '\n'
@@ -939,12 +1166,21 @@ main_menu() {
         configure_secrets
         ;;
       8)
-        doctor
+        printf '\n'
+        if [[ -f "$PROJECT_ROOT/scripts/show-credentials.sh" ]]; then
+          "$PROJECT_ROOT/scripts/show-credentials.sh"
+        else
+          log_error "Credentials script not found"
+        fi
+        pause
         ;;
       9)
-        cleanup
+        doctor
         ;;
       10)
+        cleanup
+        ;;
+      11)
         printf '\n'
         integration_panel
         pause
@@ -954,7 +1190,7 @@ main_menu() {
         exit 0
         ;;
       *)
-        log_warn "Unknown option. Please choose between 0-9."
+        log_warn "Unknown option. Please choose between 0-11."
         pause
         ;;
     esac
@@ -975,15 +1211,16 @@ cli_dispatch() {
 
   case "$command" in
     start)
-      local rebuild=false with_mcp=true
+      local rebuild=false with_mcp=true non_interactive=false
       while [[ $# -gt 0 ]]; do
         case "$1" in
           --rebuild) rebuild=true ;;
           --no-mcp) with_mcp=false ;;
+          --non-interactive|--ci) non_interactive=true ;;
         esac
         shift
       done
-      start_services "$rebuild" "$with_mcp"
+      start_services "$rebuild" "$with_mcp" "$non_interactive"
       ;;
     stop)
       stop_services
@@ -1022,6 +1259,20 @@ cli_dispatch() {
     cleanup)
       cleanup
       ;;
+    credentials|creds)
+      if [[ -f "$PROJECT_ROOT/scripts/show-credentials.sh" ]]; then
+        "$PROJECT_ROOT/scripts/show-credentials.sh"
+      else
+        log_error "Credentials script not found at $PROJECT_ROOT/scripts/show-credentials.sh"
+      fi
+      ;;
+    debug)
+      if [[ -f "$PROJECT_ROOT/scripts/debug-login.sh" ]]; then
+        "$PROJECT_ROOT/scripts/debug-login.sh"
+      else
+        log_error "Debug script not found at $PROJECT_ROOT/scripts/debug-login.sh"
+      fi
+      ;;
     portal)
       if [[ $# -gt 0 ]]; then
         launch_portal_cli "$1"
@@ -1046,23 +1297,35 @@ show_usage() {
   cat <<USAGE
 Usage: ./start.sh [command]
 
-Commands:
-  start [--rebuild] [--no-mcp]
-                           Build (optional) and launch services; skip MCP bridge with --no-mcp
+🔰 NEW TO THIRD EYE? Just run: ./start.sh
+   This opens the interactive menu that guides you through everything!
+
+🎯 Quick commands:
+  start                    🚀 Auto-setup and launch (guides you through missing credentials)
+  start --non-interactive  🤖 CI/CD mode (no prompts, starts in demo mode if needed)
+  menu                     📋 Interactive guided menu (default)
+  doctor                   🩺 Check if your environment is ready
+  configure                🔑 Setup API keys and credentials
+  credentials              🔐 Show auto-generated admin credentials from logs
+  debug                    🔍 Diagnose login issues (password mismatches, DB state)
+
+⚙️  Advanced commands:
+  start [--rebuild] [--no-mcp] [--non-interactive]
+                           Build (optional) and launch services
   stop                     Stop running containers
-  restart [--rebuild] [--no-mcp]
-                           Restart services; --no-mcp skips launching the MCP bridge
+  restart [--rebuild] [--no-mcp] [--non-interactive]
+                           Restart services
   status                   Show docker compose status
   logs                     Tail logs (interactive prompt)
   docker <args...>         Pass-through to docker compose
-  configure                Configure secrets (GROQ/OpenRouter API keys)
-  portal [session-id]      Open the Overseer portal (optionally targeting a session)
-  doctor                   Run environment doctor
+  portal [session-id]      Open the Overseer portal
   integrations             Show the integration playbook
   cleanup                  Remove containers, networks, volumes
-  menu                     Launch interactive guided menu (default)
 
-Simply run ./start.sh with no arguments for the guided experience.
+🆘 Need help?
+  - First time? Copy .env.example to .env and add your GROQ API key
+  - Problems? Check TROUBLESHOOTING.md or run './start.sh doctor'
+  - Demo mode? Run './start.sh start --non-interactive' (works without API keys)
 USAGE
 }
 

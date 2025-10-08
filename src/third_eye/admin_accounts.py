@@ -54,14 +54,23 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 def sanitize_admin_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    def _to_timestamp(value: Any) -> float | None:
+        if value is None:
+            return None
+        if hasattr(value, "timestamp"):
+            return float(value.timestamp())
+        if isinstance(value, (int, float)):
+            return float(value)
+        return None
+
     return {
         "id": record["id"],
         "email": record["email"],
         "display_name": record.get("display_name"),
         "require_password_reset": bool(record.get("require_password_reset", False)),
-        "created_at": record.get("created_at"),
-        "updated_at": record.get("updated_at"),
-        "last_login_at": record.get("last_login_at"),
+        "created_at": _to_timestamp(record.get("created_at")),
+        "updated_at": _to_timestamp(record.get("updated_at")),
+        "last_login_at": _to_timestamp(record.get("last_login_at")),
     }
 
 
@@ -71,15 +80,29 @@ async def ensure_bootstrap_admin_async(*, require_secret: bool = True) -> None:
 
     cfg = CONFIG.admin
     password = os.getenv(cfg.password_env)
+
+    # Auto-generate a secure password if not provided
     if not password:
-        message = (
-            f"Bootstrap admin password environment variable '{cfg.password_env}' is not set; "
-            "skipping auto bootstrap"
-        )
         if require_secret:
-            raise RuntimeError(message)
-        LOG.warning(message, extra={"email": cfg.email})
-        return
+            import secrets
+            import string
+            # Generate a secure 16-character password
+            alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+            password = ''.join(secrets.choice(alphabet) for _ in range(16))
+
+            LOG.warning(
+                "ADMIN_BOOTSTRAP_PASSWORD not set. Auto-generated secure password.",
+                extra={"email": cfg.email, "auto_generated": True}
+            )
+            LOG.warning(f"🔑 GENERATED ADMIN PASSWORD: {password}")
+            LOG.warning("💾 Save this password! Add ADMIN_BOOTSTRAP_PASSWORD=%s to your .env file", password)
+        else:
+            message = (
+                f"Bootstrap admin password environment variable '{cfg.password_env}' is not set; "
+                "skipping auto bootstrap"
+            )
+            LOG.warning(message, extra={"email": cfg.email})
+            return
 
     admin_id = str(uuid.uuid4())
     await create_admin_account_async(
@@ -87,12 +110,41 @@ async def ensure_bootstrap_admin_async(*, require_secret: bool = True) -> None:
         email=cfg.email,
         display_name=cfg.display_name,
         password_hash=hash_password(password),
-        require_password_reset=True,
+        require_password_reset=False,
     )
-    LOG.warning(
-        "Bootstrap admin account created.",
-        extra={"email": cfg.email, "admin_id": admin_id},
-    )
+
+    # Auto-create an initial API key for beginners
+    try:
+        # Generate the API key secret first
+        api_key = generate_api_key()
+        key_id = f"bootstrap-{admin_id[:8]}"
+
+        # Create the API key record
+        await create_api_key_async(
+            key_id=key_id,
+            raw_secret=api_key,
+            role="admin",
+            limits={},
+            tenant=None,
+            account_id=admin_id,
+            display_name="Auto-generated Bootstrap Key",
+        )
+
+        LOG.warning(
+            "Bootstrap admin account and API key created successfully!",
+            extra={"email": cfg.email, "admin_id": admin_id}
+        )
+        LOG.warning(f"🔐 GENERATED API KEY: {api_key}")
+        LOG.warning("💾 Save this API key! Add THIRD_EYE_API_KEY=%s to your .env file", api_key)
+        LOG.warning(f"📧 Admin Email: {cfg.email}")
+        LOG.warning(f"🔑 Admin Password: {password}")
+        LOG.warning("🎯 You can now access the admin control panel and Third Eye MCP!")
+    except Exception as e:
+        LOG.error(f"Failed to create initial API key: {e}")
+        LOG.warning(
+            "Bootstrap admin account created, but failed to create API key.",
+            extra={"email": cfg.email, "admin_id": admin_id},
+        )
 
 
 def ensure_bootstrap_admin(*, require_secret: bool = True) -> None:

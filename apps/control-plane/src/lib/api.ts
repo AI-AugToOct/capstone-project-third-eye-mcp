@@ -22,21 +22,43 @@ import type {
   TenantListResponse,
   TenantCreatePayload,
   TenantUpdatePayload,
+  ProviderConfigPayload,
+  ProviderConfigResponse,
 } from '../types/admin';
-
-const DEFAULT_BASE_URL = 'http://localhost:8000';
+import { getCookie } from './cookies';
 
 function resolveBaseUrl(): string {
   const raw = import.meta.env.VITE_API_BASE_URL as string | undefined;
-  return raw?.replace(/\/$/, '') || DEFAULT_BASE_URL;
+  if (raw) {
+    return raw.replace(/\/$/, '');
+  }
+
+  // For production builds without environment variable, try to infer from current location
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
+    const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    const port = window.location.hostname.includes('localhost') ? ':8000' : '';
+    return `${protocol}//${hostname}${port}`;
+  }
+
+  // Development fallback
+  return 'http://localhost:8000';
 }
 
 function authHeaders(apiKey: string): HeadersInit {
-  return {
+  const headers: HeadersInit = {
     'Content-Type': 'application/json',
     'X-API-Key': apiKey,
     'X-Request-ID': crypto.randomUUID(),
   };
+
+  // Add CSRF token if available
+  const csrfToken = getCookie('third-eye-csrf');
+  if (csrfToken) {
+    headers['X-CSRF-Token'] = csrfToken;
+  }
+
+  return headers;
 }
 
 function jsonHeaders(): HeadersInit {
@@ -49,6 +71,16 @@ function jsonHeaders(): HeadersInit {
 async function handle<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.text();
+
+    // Clear invalid session on auth errors
+    if (response.status === 401 || response.status === 403) {
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem('third-eye.admin-session');
+        // Trigger page reload to force login screen
+        setTimeout(() => window.location.reload(), 100);
+      }
+    }
+
     throw new Error(`Request failed (${response.status}): ${body || response.statusText}`);
   }
   if (response.status === 204) {
@@ -71,9 +103,14 @@ export async function getApiKeys(apiKey: string, options?: { includeRevoked?: bo
 
 export async function postApiKey(apiKey: string, payload: ApiKeyCreatePayload): Promise<ApiKeySecret> {
   const base = resolveBaseUrl();
+  const csrfToken = getCookie('third-eye-csrf');
   const response = await fetch(`${base}/admin/api-keys`, {
     method: 'POST',
-    headers: authHeaders(apiKey),
+    credentials: 'include',
+    headers: {
+      ...authHeaders(apiKey),
+      'X-CSRF-Token': csrfToken || '',
+    },
     body: JSON.stringify(payload),
   });
   return handle<ApiKeySecret>(response);
@@ -335,9 +372,14 @@ export async function adminChangePassword(
   payload: { oldPassword: string; newPassword: string },
 ): Promise<AdminLoginResponse> {
   const base = resolveBaseUrl();
+  const csrfToken = getCookie('third-eye-csrf');
   const response = await fetch(`${base}/admin/auth/change-password`, {
     method: 'POST',
-    headers: authHeaders(apiKey),
+    credentials: 'include',
+    headers: {
+      ...authHeaders(apiKey),
+      'X-CSRF-Token': csrfToken || '',
+    },
     body: JSON.stringify({ old_password: payload.oldPassword, new_password: payload.newPassword }),
   });
   return handle<AdminLoginResponse>(response);
@@ -372,4 +414,26 @@ export async function fetchBootstrapStatus(): Promise<AdminBootstrapStatus> {
     headers: jsonHeaders(),
   });
   return handle<AdminBootstrapStatus>(response);
+}
+
+export async function fetchGroqConfig(apiKey: string): Promise<ProviderConfigResponse> {
+  const base = resolveBaseUrl();
+  const response = await fetch(`${base}/admin/providers/groq/config`, {
+    method: 'GET',
+    headers: authHeaders(apiKey),
+  });
+  return handle<ProviderConfigResponse>(response);
+}
+
+export async function configureGroqProvider(
+  apiKey: string,
+  payload: ProviderConfigPayload,
+): Promise<ProviderConfigResponse> {
+  const base = resolveBaseUrl();
+  const response = await fetch(`${base}/admin/providers/groq/config`, {
+    method: 'POST',
+    headers: authHeaders(apiKey),
+    body: JSON.stringify(payload),
+  });
+  return handle<ProviderConfigResponse>(response);
 }

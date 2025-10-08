@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+import { formatDistanceToNow } from 'date-fns';
 import clsx from 'clsx';
 import type { EyeState } from '../types/pipeline';
 import sharinganPng from '../assets/eyes/sharingan.png';
@@ -55,10 +56,40 @@ const personaMeta: Record<string, { prefix: string; tone: string }> = {
 };
 
 function statusChip(state?: EyeState) {
-  if (!state) return { label: 'Pending', tone: 'bg-slate-700 text-slate-200' };
-  if (state.ok === true) return { label: state.code ?? 'OK', tone: 'bg-emerald-600/90 text-emerald-50' };
-  if (state.ok === false) return { label: state.code ?? 'Rejected', tone: 'bg-rose-600/80 text-rose-50' };
-  return { label: state.code ?? 'Awaiting', tone: 'bg-amber-600/80 text-amber-50' };
+  if (!state) return { label: 'Pending', tone: 'bg-slate-700 text-slate-200', humanLabel: 'Waiting for validation' };
+
+  // Convert technical codes to human-readable status
+  if (state.ok === true) {
+    const humanLabel = state.code?.startsWith('OK_')
+      ? 'Validation passed'
+      : 'Approved';
+    return { label: humanLabel, tone: 'bg-emerald-600/90 text-emerald-50', humanLabel };
+  }
+
+  if (state.ok === false) {
+    const humanLabel = state.code?.startsWith('E_')
+      ? 'Issues found'
+      : 'Needs revision';
+    return { label: humanLabel, tone: 'bg-rose-600/80 text-rose-50', humanLabel };
+  }
+
+  return { label: 'Processing...', tone: 'bg-amber-600/80 text-amber-50', humanLabel: 'Validation in progress' };
+}
+
+function formatValidationMessage(state: EyeState, eyeName: string): string {
+  if (!state.md) {
+    if (state.ok === true) return `${eyeName} validation completed successfully`;
+    if (state.ok === false) return `${eyeName} found validation issues`;
+    return `${eyeName} is processing your submission`;
+  }
+
+  // Clean up markdown and technical jargon
+  return state.md
+    .replace(/^#{1,6}\s*/, '') // Remove markdown headers
+    .replace(/\*\*(.*?)\*\*/g, '$1') // Remove bold markdown
+    .replace(/`([^`]+)`/g, '$1') // Remove code backticks
+    .split('\n')[0] // Take first line only
+    .substring(0, 150); // Limit length
 }
 
 export interface EyeCardProps {
@@ -78,8 +109,12 @@ export function EyeCard({ eye, state, onOpenDetails, personaMode = true, onWhyNo
   const asset = eyeAssets[eye] ?? sharinganPng;
   const label = eyeLabels[eye] ?? eye;
   const chip = statusChip(state);
-  const summary = state?.md ?? 'Awaiting validation';
+  const summary = state ? formatValidationMessage(state, label) : 'Awaiting validation';
   const persona = personaMeta[eye];
+
+  // Get timestamp for "time ago" display
+  const timestamp = state?.ts ? new Date(state.ts) : null;
+  const timeAgo = timestamp ? formatDistanceToNow(timestamp, { addSuffix: true }) : null;
 
   return (
     <motion.article
@@ -94,19 +129,53 @@ export function EyeCard({ eye, state, onOpenDetails, personaMode = true, onWhyNo
     >
       <header className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-3">
-          <img
-            src={asset}
-            alt={`${label} eye`}
-            width={56}
-            height={56}
-            className={clsx('h-14 w-14 rounded-full border border-brand-outline/40 object-cover', personaMode && 'ring-2 ring-brand-accent/30')}
-          />
-          <div>
-            <p className="text-xs uppercase tracking-[0.32em] text-brand-accent">{personaMode ? 'Persona Voice' : 'Neutral Mode'}</p>
+          <div className="relative">
+            <motion.img
+              src={asset}
+              alt={`${label} eye`}
+              width={56}
+              height={56}
+              className={clsx(
+                'h-14 w-14 rounded-full border border-brand-outline/40 object-cover transition-all duration-300',
+                personaMode && 'ring-2 ring-brand-accent/30',
+                state?.ok === null && 'animate-pulse'
+              )}
+              animate={state?.ok === null ? { scale: [1, 1.05, 1] } : { scale: 1 }}
+              transition={{ duration: 2, repeat: state?.ok === null ? Infinity : 0 }}
+            />
+            {/* Status indicator dot */}
+            {state && (
+              <motion.div
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                className={clsx(
+                  'absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-brand-paper',
+                  state.ok === true ? 'bg-green-500' :
+                  state.ok === false ? 'bg-red-500' : 'bg-yellow-500'
+                )}
+              />
+            )}
+          </div>
+          <div className="flex-1">
+            <p className="text-xs uppercase tracking-[0.32em] text-brand-accent">
+              {personaMode ? 'Persona Voice' : 'Neutral Mode'}
+            </p>
             <h3 className="text-lg font-semibold text-white">{label}</h3>
+            {timeAgo && (
+              <p className="text-xs text-slate-400 mt-1">
+                Updated {timeAgo}
+              </p>
+            )}
           </div>
         </div>
-        <span className={clsx('rounded-full px-3 py-1 text-xs font-medium', chip.tone)}>{chip.label}</span>
+        <motion.span
+          key={chip.label}
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className={clsx('rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap', chip.tone)}
+        >
+          {chip.label}
+        </motion.span>
       </header>
 
       <p className="line-clamp-3 text-sm text-slate-300">
@@ -121,7 +190,37 @@ export function EyeCard({ eye, state, onOpenDetails, personaMode = true, onWhyNo
       </p>
 
       <footer className="mt-auto flex items-center justify-between text-xs text-slate-400">
-        {state?.toolVersion ? <span>Tool {state.toolVersion}</span> : <span>Awaiting output</span>}
+        <div className="flex items-center gap-2">
+          {state?.toolVersion ? (
+            <span>Tool {state.toolVersion}</span>
+          ) : (
+            <span>Awaiting output</span>
+          )}
+          {/* Processing indicator */}
+          {state?.ok === null && (
+            <motion.div
+              className="flex gap-1"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+            >
+              {Array.from({ length: 3 }).map((_, i) => (
+                <motion.div
+                  key={i}
+                  className="w-1 h-1 bg-brand-accent rounded-full"
+                  animate={{
+                    opacity: [0.3, 1, 0.3],
+                    scale: [1, 1.2, 1]
+                  }}
+                  transition={{
+                    duration: 1.2,
+                    repeat: Infinity,
+                    delay: i * 0.2
+                  }}
+                />
+              ))}
+            </motion.div>
+          )}
+        </div>
         <button
           type="button"
           onClick={onOpenDetails}

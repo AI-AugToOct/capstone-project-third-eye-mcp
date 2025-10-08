@@ -14,6 +14,43 @@
 
 ---
 
+## 1a. Submitting Work: Orchestrator vs Manual Mode
+
+Third Eye offers two interaction modes:
+
+### Recommended: Intelligent Orchestrator
+Use `POST /eyes/overseer/orchestrate` to submit work in one request. The orchestrator:
+- Analyzes your intent and work type
+- Automatically invokes the appropriate Eyes
+- Enforces strict validation (all fields mandatory)
+- Returns consolidated results
+
+**When to use:** Most workflows, especially when you want automated routing and validation.
+
+**Example payload:**
+```json
+{
+  "payload": {
+    "intent": "Validate my authentication implementation plan",
+    "work": { "plan": "## Authentication Plan\n..." },
+    "context_info": { "project": "web-app", "stage": "planning" }
+  },
+  "reasoning_md": "Need validation before implementing security features"
+}
+```
+
+### Advanced: Manual Eye Invocation
+Invoke individual Eyes directly for granular control:
+1. Start with `POST /eyes/overseer/navigator` to initialize pipeline state
+2. Follow the workflow: Sharingan → Helper → Jogan → Rinnegan/Mangekyō → Tenseigan/Byakugan → Final Approval
+3. Each Eye call advances the pipeline state
+
+**When to use:** Custom workflows, debugging specific Eyes, fine-grained orchestration.
+
+See [API_REFERENCE.md](docs/API_REFERENCE.md#3-eye-orchestration) for full endpoint details.
+
+---
+
 ## 2. Eye Cards & Drawers
 - Each Eye (Sharingan → Byakugan) is represented by a card with status:
   - 🟢 Approved

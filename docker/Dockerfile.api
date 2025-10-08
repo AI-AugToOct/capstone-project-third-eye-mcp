@@ -1,17 +1,47 @@
-FROM python:3.11-slim AS base
+FROM python:3.11-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential curl && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY pyproject.toml uv.lock README.md config.yaml /app/
-RUN pip install --upgrade pip && pip install --no-cache-dir uv
-COPY src /app/src
-COPY tests /app/tests
-RUN uv pip install --system -e .[test] \
-    && python -c "import prometheus_client"
+
+RUN pip install --upgrade pip uv
+
+COPY pyproject.toml uv.lock README.md ./
+COPY src ./src
+
+RUN uv pip install --system --compile-bytecode -e .
+
+FROM python:3.11-slim AS runner
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/app/.venv/bin:$PATH"
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/* && \
+    groupadd -r appuser && \
+    useradd -r -g appuser -u 1001 appuser
+
+WORKDIR /app
+
+COPY --from=builder --chown=appuser:appuser /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder --chown=appuser:appuser /usr/local/bin /usr/local/bin
+
+COPY --chown=appuser:appuser src ./src
+COPY --chown=appuser:appuser config.yaml ./
+
+RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
+
+USER appuser
 
 EXPOSE 8000
+
 CMD ["uvicorn", "third_eye.api.server:app", "--host", "0.0.0.0", "--port", "8000"]

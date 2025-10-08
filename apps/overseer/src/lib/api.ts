@@ -6,12 +6,25 @@ import type {
   SessionSummary,
 } from '../types/pipeline';
 
-const DEFAULT_BASE_URL = 'http://localhost:8000';
-
 function buildBaseUrl(): string {
   const candidate = import.meta.env.VITE_API_BASE_URL as string | undefined;
-  return candidate?.replace(/\/$/, '') || DEFAULT_BASE_URL;
+  if (candidate) {
+    return candidate.replace(/\/$/, '');
+  }
+
+  // For production builds without environment variable, try to infer from current location
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
+    const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    const port = window.location.hostname.includes('localhost') ? ':8000' : '';
+    return `${protocol}//${hostname}${port}`;
+  }
+
+  // Development fallback
+  return 'http://localhost:8000';
 }
+
+export { buildBaseUrl, buildHeaders };
 
 function buildHeaders(apiKey: string, requestId?: string) {
   return {
@@ -99,7 +112,7 @@ export async function postKillSwitch(options: {
   return response.json();
 }
 
-export function buildWebSocketUrl(sessionId: string, apiKey?: string): string {
+export function buildWebSocketUrl(sessionId: string, apiKey?: string): { url: string; protocols?: string[] } {
   const base = buildBaseUrl();
   let wsBase: string;
   if (base.toLowerCase().startsWith('https://')) {
@@ -109,11 +122,12 @@ export function buildWebSocketUrl(sessionId: string, apiKey?: string): string {
   } else {
     wsBase = `ws://${base.replace(/^\/+/, '')}`;
   }
-  const url = new URL(`${wsBase}/ws/pipeline/${encodeURIComponent(sessionId)}`);
+  const url = `${wsBase}/ws/pipeline/${encodeURIComponent(sessionId)}`;
+
   if (apiKey) {
-    url.searchParams.set('api_key', apiKey);
+    return { url, protocols: [`api-key-${apiKey}`] };
   }
-  return url.toString();
+  return { url };
 }
 
 export async function postResubmitRequest(options: {
