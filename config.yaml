@@ -6,34 +6,34 @@ groq:
       "overseer/navigator":
         primary: llama-3.1-8b-instant
       "sharingan/clarify":
-        primary: llama-3.3-70b-versatile
+        primary: meta-llama/llama-4-scout-17b-16e-instruct
       "helper/rewrite_prompt":
-        primary: llama-3.3-70b-versatile
+        primary: qwen/qwen3-32b
       "jogan/confirm_intent":
         primary: llama-3.1-8b-instant
       "rinnegan/plan_requirements":
-        primary: llama-3.3-70b-versatile
+        primary: qwen/qwen3-32b
       "rinnegan/plan_review":
-        primary: llama-3.3-70b-versatile
+        primary: openai/gpt-oss-120b
       "rinnegan/final_approval":
-        primary: llama-3.3-70b-versatile
+        primary: openai/gpt-oss-120b
       "mangekyo/review_scaffold":
         primary: llama-3.3-70b-versatile
-        fallback: llama-3.3-70b-versatile
+        fallback: deepseek-r1-distill-llama-70b
       "mangekyo/review_impl":
         primary: llama-3.3-70b-versatile
-        fallback: llama-3.3-70b-versatile
+        fallback: deepseek-r1-distill-llama-70b
       "mangekyo/review_tests":
         primary: llama-3.3-70b-versatile
-        fallback: llama-3.3-70b-versatile
+        fallback: deepseek-r1-distill-llama-70b
       "mangekyo/review_docs":
         primary: llama-3.3-70b-versatile
-        fallback: llama-3.3-70b-versatile
+        fallback: deepseek-r1-distill-llama-70b
       "tenseigan/validate_claims":
-        primary: llama-3.3-70b-versatile
+        primary: openai/gpt-oss-120b
       "byakugan/consistency_check":
-        primary: llama-3.3-70b-versatile
-    embeddings: null  # Optional: nomic-embed-text-v1.5 not available
+        primary: meta-llama/llama-4-maverick-17b-128e-instruct
+    embeddings: groq/compound-mini
     policy_filter:
       primary: meta-llama/llama-guard-4-12b
   inference_defaults:
@@ -69,7 +69,7 @@ postgres:
   statement_timeout_ms: 30000
   healthcheck_interval_seconds: 30
   application_name: "third-eye-mcp"
-  require_ssl: false  # Set to true in production
+  require_ssl: true
 redis:
   host: "redis"
   port: 6379
@@ -77,8 +77,8 @@ redis:
   url_env: "REDIS_URL"
   username_env: "REDIS_USERNAME"
   password_env: "REDIS_PASSWORD"
-  require_auth: false  # Set to true in production
-  use_tls: false       # Set to true in production
+  require_auth: true
+  use_tls: true
   healthcheck_seconds: 15
   client_name: "third-eye-mcp"
   encoding: "utf-8"

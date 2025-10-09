@@ -15,10 +15,7 @@ export function launchPortal(sessionId: string, auto = true): void {
       detached: true,
     });
     child.unref();
-    console.info(`[Portal] Launched portal for session ${sessionId} with command: ${command} ${args.join(' ')}`);
   } catch (error) {
-    console.warn(`[Portal] Failed to launch portal for session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
-    console.warn(`[Portal] Command attempted: ${command} ${args.join(' ')}`);
-    console.warn(`[Portal] Ensure 'uv' is installed or set UV_PATH environment variable to correct Python runner`);
+    // ignore launch failures; portal is optional
   }
 }

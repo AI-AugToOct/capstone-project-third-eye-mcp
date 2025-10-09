@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": ".",
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "skipLibCheck": true,
+    "types": ["bun-types"]
+  },
+  "include": ["*.ts", "**/*.ts"],
+  "exclude": ["dist", "node_modules", "migrations", "__tests__", "import-personas.ts"],
+  "references": [
+    { "path": "../types" },
+    { "path": "../config" }
+  ]
+}
