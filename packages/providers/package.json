@@ -1,0 +1,11 @@
+{
+  "name": "@third-eye/providers",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.d.ts",
+  "dependencies": {
+    "@third-eye/types": "workspace:*",
+    "zod": "^3.22.4"
+  }
+}

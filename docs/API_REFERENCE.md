@@ -1,210 +1,551 @@
-# Third Eye MCP — API Reference
+# Third Eye MCP API Reference
 
-All endpoints require the `X-API-Key` header unless noted. Responses conform to the JSON envelope defined in `src/third_eye/constants.py`.
+Complete API documentation for all Third Eye MCP endpoints.
 
-## 1. Authentication & Admin
+## Base URL
 
-| Method | Path | Description |
-| --- | --- | --- |
-| `POST` | `/admin/auth/login` | Exchange admin email/password for a short-lived API key. |
-| `POST` | `/admin/auth/change-password` | Update admin password. |
-| `GET` | `/admin/bootstrap/status` | Check if bootstrap admin exists. |
+```
+http://127.0.0.1:7070
+```
 
-### API Keys
-- `GET /admin/api-keys` – list keys (`include_revoked` optional).
-- `POST /admin/api-keys` – create key (role, tenant, TTL, limits).
-- `POST /admin/api-keys/{id}/rotate` – rotate secret.
-- `POST /admin/api-keys/{id}/revoke` / `/restore` – lifecycle.
-- `PATCH /admin/api-keys/{id}` – update limits/expiry/display name.
+## Authentication
 
-### Tenants
-- `GET /admin/tenants`
-- `POST /admin/tenants`
-- `PATCH /admin/tenants/{id}`
-- `POST /admin/tenants/{id}/archive`
-- `POST /admin/tenants/{id}/restore`
+Optional API key authentication. Set `REQUIRE_API_KEY=true` in `.env` to enable.
 
-### Profiles & Provider
-- `GET /admin/profiles`
-- `PUT /admin/profiles` – body `{ "profiles": { "security": { ... } } }`.
-- `GET /admin/provider`
-- `PUT /admin/provider` – body `{ "mode": "api|offline", "engine": { ... } }`.
+**Header**: `X-API-Key: your-api-key`
+**Query Parameter**: `?apiKey=your-api-key`
 
-### Environment Settings
-- `GET /admin/settings`
-- `PUT /admin/settings`
+## Rate Limits
 
-### Audits & Metrics
-- `GET /admin/audit`
-- `GET /admin/metrics/overview`
+- **MCP Routes** (`/mcp/*`): 100 requests/minute per session/IP
+- **Session Routes** (`/sessions/*`): 200 requests/minute per session/IP
+- **Duel Routes** (`/duel/*`): 50 requests/minute per session/IP
 
-Refer to `tests/test_admin_api.py` for request/response fixtures.
+Headers returned:
+- `X-RateLimit-Limit`: Maximum requests allowed
+- `X-RateLimit-Remaining`: Requests remaining in current window
+- `X-RateLimit-Reset`: Unix timestamp when limit resets
 
-## 2. Session Lifecycle
+---
 
-| Method | Path | Description |
-| --- | --- | --- |
-| `POST` | `/session` | Create a new session; returns `{ session_id, profile, settings, provider, portal_url }`. |
-| `GET` | `/sessions` | List sessions accessible to the caller (tenant-aware). |
-| `GET` | `/sessions/{session_id}` | Detailed session info (events, settings, eye status). |
-| `GET` | `/session/{session_id}/events` | Timeline events (eye updates, custom events). |
-| `POST` | `/session/{session_id}/clarifications` | Submit clarifying answers. |
-| `POST` | `/session/{session_id}/resubmit` | Request re-review for an Eye. |
-| `POST` | `/session/{session_id}/duel` | Launch a duel between agents. |
-| `POST` | `/session/{session_id}/export` | Export session (`fmt=pdf|html`). |
-| `POST` | `/session/{session_id}/revalidate` | Re-run Tenseigan & Byakugan on latest draft. |
-| `PUT` | `/session/{session_id}/settings` | Update profile/overrides; triggers websocket broadcast. |
+## MCP Endpoints
 
-## 3. Eye Orchestration
+### GET /mcp/tools
 
-Third Eye provides two approaches for interacting with validation eyes:
+List all registered Eyes with metadata.
 
-### 3a. Recommended: Intelligent Orchestrator
-
-**`POST /eyes/overseer/orchestrate`** — The primary entry point that intelligently routes work through appropriate eyes.
-
-The orchestrator uses LLM-based analysis to determine which eyes to invoke based on your intent and work type, then executes the validation pipeline automatically.
-
-**Request Format:**
+**Response**: `200 OK`
 ```json
 {
-  "context": {
-    "session_id": "sess-123",
-    "tenant": "cli",
-    "user_id": "agent-7",
-    "lang": "en",
-    "budget_tokens": 1200,
-    "settings": { ... }
-  },
-  "payload": {
-    "intent": "Clear validation request describing what you want validated",
-    "work": {
-      "code": "...",
-      "plan": "...",
-      "draft": "...",
-      "requirements": "..."
-    },
-    "context_info": {
-      "project": "project name",
-      "stage": "development|review|final",
-      "additional_context": "any relevant details"
+  "tools": [
+    {
+      "name": "sharingan",
+      "description": "Ambiguity Radar - Detects vague requests",
+      "version": "1.0.0",
+      "tags": ["clarification", "validation"],
+      "inputSchema": { "type": "object", ... },
+      "outputSchema": { "type": "object", ... }
     }
-  },
-  "reasoning_md": "### Reasoning\nExplain your approach and why this work should be validated"
+  ],
+  "count": 8
 }
 ```
 
-**Strict Validation:**
-- All fields are **mandatory** (intent, work, context_info, reasoning_md)
-- Minimum lengths enforced (intent: 5 chars, reasoning_md: 10 chars)
-- Work must contain at least one property (code/plan/draft/requirements)
-- Context_info must contain at least one property
-- Incomplete submissions are **immediately rejected** with detailed error messages
+### GET /mcp/quickstart
 
-**Intelligent Routing:**
-The orchestrator analyzes your intent and work, then automatically invokes the appropriate eyes:
-- Ambiguous requests → Sharingan (clarification flow)
-- Plan submissions → Rinnegan (plan review)
-- Code/drafts → Tenseigan (validate claims) + Byakugan (consistency)
-- Complex workflows → Multi-eye pipelines
+Get workflow recommendations and routing suggestions.
 
-**Response:**
-Returns results from all invoked eyes, or stops early if clarifications/revisions are needed.
+**Response**: `200 OK`
+```json
+{
+  "quickstart": {
+    "workflows": {
+      "clarification": {
+        "description": "For ambiguous requests",
+        "sequence": ["sharingan", "prompt-helper", "jogan"]
+      }
+    },
+    "routing": {
+      "sharingan": "Works best with fast models like llama3.1-8b"
+    },
+    "primers": {
+      "newSession": "Start with Sharingan if intent unclear"
+    }
+  }
+}
+```
 
-**Example:**
+### GET /mcp/schemas
+
+Get all Eye JSON schemas and error codes.
+
+**Response**: `200 OK`
+```json
+{
+  "envelope": {
+    "type": "object",
+    "properties": { ... },
+    "required": ["eye", "code", "verdict", "summary"]
+  },
+  "errorCodes": {
+    "success": ["OK", "OK_WITH_NOTES"],
+    "rejection": ["REJECT_AMBIGUOUS", ...],
+    "clarification": ["NEED_CLARIFICATION", ...]
+  }
+}
+```
+
+### GET /mcp/examples/:eye
+
+Get example inputs/outputs for a specific Eye.
+
+**Parameters**:
+- `eye` (path): Eye name (sharingan, jogan, etc.)
+
+**Response**: `200 OK`
+```json
+{
+  "eye": "sharingan",
+  "examples": [
+    {
+      "input": "make it better",
+      "output": {
+        "eye": "sharingan",
+        "code": "NEED_CLARIFICATION",
+        "verdict": "NEEDS_INPUT",
+        "summary": "Request is too vague",
+        "metadata": {
+          "ambiguityScore": 85,
+          "clarifyingQuestions": ["What needs improvement?"]
+        }
+      },
+      "description": "Extremely vague request"
+    }
+  ]
+}
+```
+
+**Errors**:
+- `404 Not Found`: Eye not found
+
+### POST /mcp/run
+
+Execute an Eye with input.
+
+**Request Body**:
+```json
+{
+  "eye": "sharingan",
+  "input": { "prompt": "make it better" },
+  "sessionId": "optional-session-id"
+}
+```
+
+Or auto-routing mode:
+```json
+{
+  "task": "implement user authentication",
+  "sessionId": "optional-session-id"
+}
+```
+
+**Response**: `200 OK`
+```json
+{
+  "eye": "sharingan",
+  "code": "NEED_CLARIFICATION",
+  "verdict": "NEEDS_INPUT",
+  "summary": "Request requires clarification",
+  "metadata": { ... }
+}
+```
+
+**Errors**:
+- `400 Bad Request`: Validation error, order guard violation
+- `429 Too Many Requests`: Rate limit exceeded
+- `500 Internal Server Error`: Execution failed
+
+### GET /mcp/health
+
+Check MCP service health.
+
+**Response**: `200 OK`
+```json
+{
+  "ok": true,
+  "service": "third-eye-mcp",
+  "timestamp": "2025-10-06T12:00:00.000Z"
+}
+```
+
+---
+
+## Session Endpoints
+
+### POST /sessions
+
+Create a new session.
+
+**Request Body** (optional):
+```json
+{
+  "config": {
+    "userIntent": "implement feature",
+    "projectContext": "..."
+  }
+}
+```
+
+**Response**: `200 OK`
+```json
+{
+  "sessionId": "abc123",
+  "portalUrl": "http://127.0.0.1:3300/session/abc123",
+  "session": {
+    "id": "abc123",
+    "status": "active",
+    "createdAt": "2025-10-06T12:00:00.000Z"
+  }
+}
+```
+
+### GET /sessions/:id
+
+Get session details.
+
+**Response**: `200 OK`
+```json
+{
+  "id": "abc123",
+  "status": "active",
+  "createdAt": "2025-10-06T12:00:00.000Z",
+  "configJson": { ... }
+}
+```
+
+### GET /sessions/:id/runs
+
+Get all runs for a session.
+
+**Query Parameters**:
+- `limit` (default: 100): Number of runs to return
+- `offset` (default: 0): Pagination offset
+
+**Response**: `200 OK`
+```json
+{
+  "sessionId": "abc123",
+  "runs": [
+    {
+      "id": "run-1",
+      "eye": "sharingan",
+      "model": "llama3.1-8b",
+      "latencyMs": 1234,
+      "tokensIn": 50,
+      "tokensOut": 100,
+      "createdAt": "2025-10-06T12:00:00.000Z"
+    }
+  ],
+  "limit": 100,
+  "offset": 0
+}
+```
+
+### GET /sessions/:id/context
+
+Get session context.
+
+**Response**: `200 OK`
+```json
+{
+  "sessionId": "abc123",
+  "context": {
+    "projectName": {
+      "value": "Third Eye MCP",
+      "source": "user",
+      "addedAt": "2025-10-06T12:00:00.000Z"
+    }
+  }
+}
+```
+
+### POST /sessions/:id/context
+
+Add context item to session.
+
+**Request Body**:
+```json
+{
+  "source": "user",
+  "key": "projectName",
+  "value": "Third Eye MCP"
+}
+```
+
+**Response**: `200 OK`
+```json
+{
+  "sessionId": "abc123",
+  "context": { ... }
+}
+```
+
+**Errors**:
+- `400 Bad Request`: Invalid source (must be 'user' or 'eye')
+
+### DELETE /sessions/:id/context/:key
+
+Remove context item from session.
+
+**Response**: `200 OK`
+```json
+{
+  "sessionId": "abc123",
+  "context": { ... }
+}
+```
+
+### POST /sessions/:id/kill
+
+Stop all Eyes in session (kill switch).
+
+**Response**: `200 OK`
+```json
+{
+  "sessionId": "abc123",
+  "status": "killed",
+  "stoppedEyes": ["sharingan", "jogan"],
+  "message": "Killed session and stopped 2 Eye(s)"
+}
+```
+
+**Errors**:
+- `400 Bad Request`: Session already killed
+- `404 Not Found`: Session not found
+
+### POST /sessions/:id/clarifications/:clarificationId/validate
+
+Validate clarification answer.
+
+**Request Body**:
+```json
+{
+  "answer": "I want to implement user authentication"
+}
+```
+
+**Response**: `200 OK`
+```json
+{
+  "valid": true,
+  "clarificationId": "clarif-123",
+  "answer": "I want to implement user authentication"
+}
+```
+
+Or if invalid:
+```json
+{
+  "valid": false,
+  "reason": "Answer too short",
+  "suggestion": "Please provide more detail"
+}
+```
+
+### GET /sessions/:id/export
+
+Export session data in multiple formats.
+
+**Query Parameters**:
+- `format` (default: json): Export format (json|md|csv)
+
+**Response**: `200 OK`
+
+**JSON Format**:
+```json
+{
+  "session": { ... },
+  "runs": [ ... ],
+  "events": [ ... ],
+  "exportedAt": "2025-10-06T12:00:00.000Z"
+}
+```
+
+**Markdown Format**: Human-readable timeline
+**CSV Format**: Metrics-only (eye,model,latency_ms,tokens_in,tokens_out,verdict)
+
+**Errors**:
+- `400 Bad Request`: Invalid format
+
+---
+
+## Duel Endpoints
+
+### POST /duel/v2
+
+Start model comparison duel.
+
+**Request Body**:
+```json
+{
+  "eyeName": "sharingan",
+  "modelA": "claude-sonnet-4",
+  "modelB": "gpt-4-turbo",
+  "input": "make it better",
+  "iterations": 5
+}
+```
+
+**Response**: `200 OK`
+```json
+{
+  "duelId": "duel-123",
+  "status": "pending",
+  "message": "Duel started"
+}
+```
+
+**Errors**:
+- `400 Bad Request`: Missing required fields, iterations > 10
+
+### GET /duel/:id/status
+
+Get duel progress.
+
+**Response**: `200 OK`
+```json
+{
+  "duelId": "duel-123",
+  "status": "running",
+  "eyeName": "sharingan",
+  "modelA": "claude-sonnet-4",
+  "modelB": "gpt-4-turbo",
+  "iterations": 5,
+  "createdAt": "2025-10-06T12:00:00.000Z"
+}
+```
+
+### GET /duel/:id/results
+
+Get final duel results (only when completed).
+
+**Response**: `200 OK`
+```json
+{
+  "duelId": "duel-123",
+  "winner": "modelA",
+  "results": {
+    "modelA": {
+      "approvals": 4,
+      "avgLatency": 1234,
+      "results": [ ... ]
+    },
+    "modelB": {
+      "approvals": 3,
+      "avgLatency": 2345,
+      "results": [ ... ]
+    }
+  },
+  "completedAt": "2025-10-06T12:05:00.000Z"
+}
+```
+
+**Errors**:
+- `400 Bad Request`: Duel not yet completed
+- `404 Not Found`: Duel not found
+
+---
+
+## Error Codes
+
+### HTTP Status Codes
+- `200 OK`: Success
+- `400 Bad Request`: Validation error
+- `401 Unauthorized`: Missing/invalid API key
+- `404 Not Found`: Resource not found
+- `429 Too Many Requests`: Rate limit exceeded
+- `500 Internal Server Error`: Server error
+
+### Eye Error Codes
+- **Success**: `OK`, `OK_WITH_NOTES`
+- **Rejection**: `REJECT_AMBIGUOUS`, `REJECT_UNSAFE`, `REJECT_INCOMPLETE`, `REJECT_INCONSISTENT`, `REJECT_NO_EVIDENCE`, `REJECT_BAD_PLAN`, `REJECT_CODE_ISSUES`
+- **Clarification**: `NEED_CLARIFICATION`, `NEED_MORE_CONTEXT`, `SUGGEST_ALTERNATIVE`
+- **Error**: `EYE_ERROR`, `EYE_TIMEOUT`, `INVALID_ENVELOPE`
+
+---
+
+## Examples
+
+### Complete Workflow Example
+
 ```bash
-curl -X POST https://your-api.com/eyes/overseer/orchestrate \
-  -H "X-API-Key: your-key" \
+# 1. Create session
+curl -X POST http://127.0.0.1:7070/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"config": {"userIntent": "implement auth"}}'
+
+# 2. Run Sharingan
+curl -X POST http://127.0.0.1:7070/mcp/run \
   -H "Content-Type: application/json" \
   -d '{
-    "payload": {
-      "intent": "Validate my implementation plan for user authentication",
-      "work": { "plan": "## Plan\n1. Add auth middleware\n2. ..." },
-      "context_info": { "project": "web-app", "stage": "planning" }
-    },
-    "reasoning_md": "Need validation before implementing security-critical features"
+    "eye": "sharingan",
+    "input": {"prompt": "make it better"},
+    "sessionId": "abc123"
+  }'
+
+# 3. Export session
+curl "http://127.0.0.1:7070/sessions/abc123/export?format=json" \
+  -o session-export.json
+```
+
+### Auto-Routing Example
+
+```bash
+curl -X POST http://127.0.0.1:7070/mcp/run \
+  -H "Content-Type": "application/json" \
+  -d '{
+    "task": "implement user authentication with JWT",
+    "sessionId": "abc123"
   }'
 ```
 
----
+### Duel Mode Example
 
-### 3b. Advanced: Manual Eye Invocation
+```bash
+# Start duel
+curl -X POST http://127.0.0.1:7070/duel/v2 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "eyeName": "sharingan",
+    "modelA": "claude-sonnet-4",
+    "modelB": "gpt-4-turbo",
+    "input": "implement feature X",
+    "iterations": 5
+  }'
 
-For granular control, individual eyes can be invoked directly. This is recommended for advanced users who need fine-grained orchestration or custom workflows.
+# Poll status
+curl http://127.0.0.1:7070/duel/duel-123/status
 
-**Navigator Entry Point:**
-- `POST /eyes/overseer/navigator` — Schema primer, no LLM. Must be called first to initialize pipeline state.
-
-**Request Format (applies to all individual eye endpoints):**
-```json
-{
-  "context": {
-    "session_id": "sess-123",
-    "tenant": "cli",
-    "user_id": "agent-7",
-    "lang": "en",
-    "budget_tokens": 1200,
-    "settings": { ... }
-  },
-  "payload": { ... },
-  "reasoning_md": "### Reasoning\n..." // when required
-}
+# Get results
+curl http://127.0.0.1:7070/duel/duel-123/results
 ```
-
-**Available Individual Eyes:**
-
-| Method/Path | Eye | Notes |
-| --- | --- | --- |
-| `POST /eyes/sharingan/clarify` | Sharingan | Uses session ambiguity threshold. |
-| `POST /eyes/helper/rewrite_prompt` | Prompt Helper | Requires clarifications output. |
-| `POST /eyes/jogan/confirm_intent` | Jōgan | Validates ROLE/TASK/CONTEXT/REQUIREMENTS/OUTPUT. |
-| `POST /eyes/rinnegan/plan_requirements` | Rinnegan plan schema | Ingests plan markdown for embeddings. |
-| `POST /eyes/rinnegan/plan_review` | Rinnegan plan review | Enforces rollback based on settings. |
-| `POST /eyes/mangekyo/review_scaffold` | Mangekyō scaffold | Strictness derived from `mangekyo`. |
-| `POST /eyes/mangekyo/review_impl` | Mangekyō impl |
-| `POST /eyes/mangekyo/review_tests` | Mangekyō tests | Checks coverage thresholds. |
-| `POST /eyes/mangekyo/review_docs` | Mangekyō docs |
-| `POST /eyes/tenseigan/validate_claims` | Tenseigan | Citation cutoff from settings. |
-| `POST /eyes/byakugan/consistency_check` | Byakugan | Consistency tolerance from settings. |
-| `POST /eyes/rinnegan/final_approval` | Final approval |
-
-**Helper Endpoints:**
-- `POST /session/{id}/clarifications` — Submit clarifications
-- `POST /session/{id}/duel` — Launch agent duel
-
-**Typical Manual Flow:**
-1. Navigator → 2. Sharingan → 3. Helper → 4. Jogan → 5. Rinnegan (plan) → 6. Mangekyō (code) → 7. Tenseigan/Byakugan (text) → 8. Final Approval
-
-See unit tests in `tests/test_api.py` and `tests/test_eye_settings.py` for payload examples.
-
-## 4. Websocket
-
-`GET /ws/pipeline/{session_id}` (header `X-API-Key`). Messages:
-- `settings_update` — `{ "type": "settings_update", "session_id", "data": { profile, overrides, effective, provider, pipeline }, "ts" }`
-- `eye_update` — standard event payload per Eye.
-- Custom events: `user_input`, `resubmit_requested`, `duel_requested`, etc.
-
-Example (from `tests/test_admin_api.py::test_admin_key_accesses_sessions_and_pipeline`):
-```json
-{
-  "type": "settings_update",
-  "session_id": "sess-1",
-  "data": {
-    "profile": "enterprise",
-    "effective": { ... }
-  },
-  "ts": 1738620384.123
-}
-```
-
-## 5. Health & Metrics
-
-| Path | Description |
-| --- | --- |
-| `GET /health/live` | Liveness probe. |
-| `GET /health/ready` | Readiness (checks DB + Redis). |
-| `GET /metrics` | Prometheus metrics. |
 
 ---
 
-For onboarding flows and UI walkthroughs see [USER_GUIDE.md](../USER_GUIDE.md) and [ADMIN_GUIDE.md](ADMIN_GUIDE.md).
+## Security
+
+### Best Practices
+
+1. **API Keys**: Enable for production deployments (`REQUIRE_API_KEY=true`)
+2. **Localhost Binding**: Default is `127.0.0.1` (localhost only)
+3. **Rate Limiting**: Enforced automatically on all routes
+4. **Input Validation**: All inputs sanitized to prevent XSS/SQL injection
+
+### Network Exposure
+
+**Development**: Binds to `127.0.0.1` (localhost only)
+**Production**: Set `HOST=0.0.0.0` to expose on network (requires API key)
+
+---
+
+*Last Updated: 2025-10-06*

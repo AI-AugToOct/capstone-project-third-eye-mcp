@@ -1,664 +1,459 @@
 # Third Eye MCP Architecture
 
-**Version:** 1.0
-**Last Updated:** January 2025
-
----
-
 ## System Overview
 
-Third Eye MCP is a multi-modal validation orchestrator that intelligently routes validation tasks through specialized "eye" components. It provides real-time feedback, multi-tenancy, and comprehensive audit trails for AI-assisted content validation.
+Third Eye MCP is a professional-grade AI orchestration server built on modern TypeScript tooling. It provides a unified interface for routing requests across multiple AI providers with intelligent fallback, retry logic, and real-time monitoring.
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                    Third Eye MCP System                       │
-├──────────────────────────────────────────────────────────────┤
-│                                                               │
-│  ┌─────────────┐    ┌──────────────┐    ┌──────────────┐   │
-│  │   Client    │───▶│   API Layer  │───▶│ Orchestrator │   │
-│  │  (Portal)   │◀───│  (FastAPI)   │◀───│  (Overseer)  │   │
-│  └─────────────┘    └──────────────┘    └──────────────┘   │
-│         │                  │                     │           │
-│         │                  │                     ▼           │
-│         │                  │            ┌────────────────┐  │
-│         │                  │            │  Eye Registry  │  │
-│         │                  │            └────────────────┘  │
-│         │                  │              │  │  │  │        │
-│         │                  │              ▼  ▼  ▼  ▼        │
-│         │                  │         ┌──────────────────┐  │
-│         │                  │         │ Validation Eyes  │  │
-│         │                  │         │ • Sharingan      │  │
-│         │                  │         │ • Rinnegan       │  │
-│         │                  │         │ • Tenseigan      │  │
-│         │                  │         │ • Byakugan       │  │
-│         │                  │         └──────────────────┘  │
-│         │                  │                     │           │
-│         │                  ▼                     ▼           │
-│         │         ┌─────────────────┐   ┌──────────────┐  │
-│         └────────▶│  WebSocket Bus  │   │ LLM Provider │  │
-│                   │  (Real-time)    │   │ (Groq/etc)   │  │
-│                   └─────────────────┘   └──────────────┘  │
-│                            │                                │
-│  ┌─────────────────────────┼────────────────────────────┐ │
-│  │         Storage Layer    │                            │ │
-│  │  ┌───────────┐  ┌───────▼────┐  ┌─────────────┐    │ │
-│  │  │ PostgreSQL│  │   Redis    │  │  File Cache │    │ │
-│  │  │(Sessions, │  │ (Sessions, │  │  (Optional) │    │ │
-│  │  │ Audit)    │  │  Quotas)   │  │             │    │ │
-│  │  └───────────┘  └────────────┘  └─────────────┘    │ │
-│  └──────────────────────────────────────────────────────┘ │
-│                                                             │
+┌─────────────────────────────────────────────────────────────┐
+│                      Third Eye Portal (UI)                  │
+│                    Next.js 15 App Router                    │
+│                   http://127.0.0.1:3300                     │
+└────────────────┬────────────────────────────────────────────┘
+                 │
+                 │ HTTP + WebSocket
+                 │
+┌────────────────▼────────────────────────────────────────────┐
+│                 Third Eye MCP Server                        │
+│                   Bun + Hono Framework                      │
+│                   http://127.0.0.1:7070                     │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │         Eye Orchestrator (Core Logic)                │  │
+│  │  - Request routing and provider selection            │  │
+│  │  - Retry logic with exponential backoff              │  │
+│  │  - Fallback to alternative providers                 │  │
+│  │  - Persona injection and context building            │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │         Provider Abstraction Layer                   │  │
+│  │  - Groq        (API key required)                    │  │
+│  │  - OpenRouter  (API key required)                    │  │
+│  │  - Ollama      (Local, no key)                       │  │
+│  │  - LM Studio   (Local, no key)                       │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │         WebSocket Manager                            │  │
+│  │  - Real-time session monitoring                      │  │
+│  │  - Broadcast run updates to connected clients        │  │
+│  │  - Connection health checks (ping/pong)              │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │         SQLite Database (Drizzle ORM)                │  │
+│  │  - Sessions, Runs, Routing configs                   │  │
+│  │  - Personas with version control                     │  │
+│  │  - Encrypted API keys (AES-256-GCM)                  │  │
+│  └──────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
+                         │
+                         │ API Calls
+                         │
+         ┌───────────────┼───────────────┐
+         │               │               │
+         ▼               ▼               ▼
+    ┌────────┐      ┌────────┐      ┌────────┐
+    │  Groq  │      │OpenRtr │      │ Ollama │
+    └────────┘      └────────┘      └────────┘
 ```
-
----
 
 ## Core Components
 
-### 1. API Layer (FastAPI)
+### 1. Eye Orchestrator (`packages/core`)
 
-**Location:** `src/third_eye/api/server.py`
+**Purpose**: Central orchestration engine that routes requests to appropriate AI providers
 
-**Responsibilities:**
-- HTTP request handling
-- Authentication & authorization
-- Rate limiting & quotas
-- CSRF protection
-- WebSocket connections
-- Health checks
+**Key Features**:
+- **Eye Registry**: Manages different "Eyes" (Sharingan, Rinnegan, Tenseigan) with unique personas
+- **Routing Resolution**: Determines primary and fallback provider/model for each Eye
+- **Retry Logic**: Exponential backoff (100ms → 300ms → 900ms) on transient failures
+- **Fallback Chain**: Automatic failover to fallback provider if primary fails
+- **Persona Injection**: Loads active persona and injects into system prompt
+- **Envelope Standardization**: Returns consistent `Envelope` format across all providers
 
-**Key Endpoints:**
+**File**: `packages/core/orchestrator.ts`
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/validate` | POST | Orchestrator entry point |
-| `/session/{id}` | GET | Session details |
-| `/ws/pipeline/{id}` | WS | Real-time updates |
-| `/admin/*` | * | Admin operations |
-| `/health/ready` | GET | Readiness probe |
-
-**Authentication Flow:**
-
-```
-1. Client sends X-API-Key header
-2. Middleware validates against database
-3. Extracts role (admin/consumer) and tenant
-4. Checks tenant quota
-5. Extends admin session TTL if applicable
-6. Forwards to handler
-```
-
----
-
-### 2. Orchestrator (Overseer)
-
-**Location:** `src/third_eye/eyes/overseer.py`
-
-**Purpose:** Intelligent validation routing based on LLM analysis
-
-**Flow:**
-
-```
-┌─────────────────────────────────────────────────────────┐
-│ 1. Receive Validation Request                           │
-│    {payload, reasoning_md, strict_mode}                 │
-└──────────────────┬──────────────────────────────────────┘
-                   │
-                   ▼
-┌─────────────────────────────────────────────────────────┐
-│ 2. Validate Payload Schema                              │
-│    - Strict mode: All fields required                   │
-│    - Relaxed mode: Only intent required                 │
-└──────────────────┬──────────────────────────────────────┘
-                   │
-                   ▼
-┌─────────────────────────────────────────────────────────┐
-│ 3. LLM Decision (Groq/OpenAI)                           │
-│    Input: intent + work + context                       │
-│    Output: eyes_needed[] + reasoning                    │
-└──────────────────┬──────────────────────────────────────┘
-                   │
-                   ▼
-┌─────────────────────────────────────────────────────────┐
-│ 4. Execute Eyes Pipeline                                │
-│    for eye in eyes_needed:                              │
-│      - Emit progress event                              │
-│      - Invoke eye validation                            │
-│      - Collect results                                  │
-└──────────────────┬──────────────────────────────────────┘
-                   │
-                   ▼
-┌─────────────────────────────────────────────────────────┐
-│ 5. Synthesize Results                                   │
-│    - Calculate confidence score                         │
-│    - Aggregate validations                              │
-│    - Return comprehensive response                      │
-└─────────────────────────────────────────────────────────┘
-```
-
-**Progress Streaming:**
-
-```javascript
-// WebSocket events emitted during orchestration
-{
-  "type": "orchestration_progress",
-  "stage": "eye_sharingan",
-  "message": "Executing sharingan validation",
-  "progress": 0.33,  // 0.0 to 1.0
-  "current_stage": 1,
-  "total_stages": 4
+```typescript
+export class EyeOrchestrator {
+  async run(eye: string, input: string, sessionId: string): Promise<Envelope> {
+    // 1. Resolve routing config (primary + fallback)
+    // 2. Load persona for this Eye
+    // 3. Build completion request with persona
+    // 4. Try primary provider with retry logic
+    // 5. If primary fails, try fallback provider
+    // 6. Return Envelope with response or error
+  }
 }
 ```
 
----
+### 2. Provider Abstraction (`packages/providers`)
 
-### 3. Validation Eyes
+**Purpose**: Unified interface for multiple AI providers
 
-#### Sharingan Eye
-**Purpose:** Ambiguity detection and clarification
+**Interface**: `ProviderClient`
+- `listModels()`: Fetch available models
+- `complete(request)`: Execute completion request
+- `health()`: Check provider availability
 
-**Location:** `src/third_eye/eyes/sharingan.py`
+**Implementations**:
+- **GroqProvider** (`providers/groq.ts`): OpenAI-compatible API (api.groq.com)
+- **OpenRouterProvider** (`providers/openrouter.ts`): OpenRouter API (openrouter.ai)
+- **OllamaProvider** (`providers/ollama.ts`): Local Ollama server (127.0.0.1:11434)
+- **LMStudioProvider** (`providers/lmstudio.ts`): Local LM Studio server (127.0.0.1:1234)
 
-**Process:**
-1. Analyze query for ambiguous terms
-2. Generate clarification questions
-3. Compile markdown with detected issues
-4. Return ambiguity score (0-1)
+**Factory Pattern**: `ProviderFactory` creates provider instances based on routing config
 
-**Output:**
-```json
-{
-  "ambiguity_score": 0.42,
-  "clarifications": [
-    {"question": "What format?", "context": "..."}
-  ]
-}
-```
+### 3. Database Layer (`packages/db`)
 
----
+**Technology**: SQLite with Drizzle ORM
 
-#### Rinnegan Eye
-**Purpose:** Plan validation and completeness
-
-**Location:** `src/third_eye/eyes/rinnegan.py`
-
-**Process:**
-1. Parse submitted plan structure
-2. Check for logical gaps
-3. Validate dependencies
-4. Assess completeness
-
-**Output:**
-```json
-{
-  "completeness": 0.85,
-  "gaps": ["Missing error handling"],
-  "recommendations": [...]
-}
-```
-
----
-
-#### Tenseigan Eye
-**Purpose:** Fact-checking and claim validation
-
-**Location:** `src/third_eye/eyes/tenseigan.py`
-
-**Process:**
-1. Extract factual claims from text
-2. Validate against knowledge base
-3. Flag unverifiable claims
-4. Provide evidence links
-
-**Output:**
-```json
-{
-  "claims": [
-    {"text": "...", "confidence": 0.9, "evidence": "..."}
-  ],
-  "unverified": [...]
-}
-```
-
----
-
-#### Byakugan Eye
-**Purpose:** Consistency checking across context
-
-**Location:** `src/third_eye/eyes/byakugan.py`
-
-**Process:**
-1. Compare new content against previous
-2. Detect contradictions
-3. Check terminology consistency
-4. Validate cross-references
-
-**Output:**
-```json
-{
-  "consistency_score": 0.92,
-  "contradictions": [],
-  "recommendations": [...]
-}
-```
-
----
-
-### 4. Storage Layer
-
-#### PostgreSQL
-**Purpose:** Persistent data storage
-
-**Schema:**
-
+**Schema Tables**:
 ```sql
--- Sessions
-CREATE TABLE sessions (
-  session_id TEXT PRIMARY KEY,
-  created_at TIMESTAMP DEFAULT NOW(),
-  tenant_id TEXT
-);
+-- Eye routing configurations
+routing (
+  id INTEGER PRIMARY KEY,
+  eye TEXT NOT NULL,  -- 'sharingan' | 'rinnegan' | 'tenseigan'
+  primaryProvider TEXT,
+  primaryModel TEXT,
+  fallbackProvider TEXT,
+  fallbackModel TEXT
+)
 
--- Audit Events
-CREATE TABLE audit_events (
-  id SERIAL PRIMARY KEY,
-  created_at TIMESTAMP DEFAULT NOW(),
-  actor TEXT,
-  action TEXT,
-  target TEXT,
-  tenant_id TEXT,
-  metadata JSONB
-);
+-- Persona templates with versioning
+personas (
+  id INTEGER PRIMARY KEY,
+  eye TEXT NOT NULL,
+  version INTEGER DEFAULT 1,
+  template TEXT NOT NULL,  -- System prompt
+  isActive BOOLEAN DEFAULT FALSE,
+  createdAt INTEGER
+)
 
--- API Keys
-CREATE TABLE api_keys (
+-- User sessions
+sessions (
   id TEXT PRIMARY KEY,
-  secret_hash TEXT NOT NULL,
-  role TEXT NOT NULL,
-  tenant TEXT,
-  created_at TIMESTAMP DEFAULT NOW(),
-  revoked_at TIMESTAMP,
-  limits JSONB
-);
+  userId TEXT,
+  metadata TEXT,  -- JSON blob
+  createdAt INTEGER
+)
+
+-- Individual runs (Eye invocations)
+runs (
+  id TEXT PRIMARY KEY,
+  sessionId TEXT REFERENCES sessions(id),
+  eye TEXT NOT NULL,
+  input TEXT NOT NULL,
+  output TEXT,  -- JSON envelope
+  status TEXT,  -- 'pending' | 'success' | 'error'
+  createdAt INTEGER
+)
+
+-- Encrypted provider API keys
+providerKeys (
+  id INTEGER PRIMARY KEY,
+  provider TEXT NOT NULL,
+  label TEXT,
+  encryptedKey TEXT NOT NULL,  -- AES-256-GCM encrypted
+  iv TEXT NOT NULL,
+  tag TEXT NOT NULL,
+  createdAt INTEGER
+)
 ```
 
----
+**Encryption**: API keys encrypted with AES-256-GCM using PBKDF2-derived key from `THIRD_EYE_SECURITY_ENCRYPTION_KEY` env var
 
-#### Redis
-**Purpose:** Fast-access caching and session management
+**File**: `packages/db/schema.ts`
 
-**Key Patterns:**
+### 4. HTTP Server (`apps/server`)
 
-| Pattern | Purpose | TTL |
-|---------|---------|-----|
-| `session_ttl:{id}` | Session expiration tracking | 7 days |
-| `admin_session:{key_id}` | Admin session state | 1 hour |
-| `tenant_quota:{id}` | Tenant quota limits | Persistent |
-| `tenant_usage:{id}:{window}` | Usage tracking | 48 hours |
-| `llm_health` | LLM connectivity status | 30 seconds |
+**Framework**: Hono (lightweight Express alternative)
 
----
+**Routes**:
+```
+GET  /health                    - Server health check
+GET  /ws/monitor?sessionId=X    - WebSocket upgrade endpoint
+
+GET  /api/sessions              - List all sessions
+POST /api/sessions              - Create new session
+GET  /api/sessions/:id          - Get session details
+GET  /api/sessions/:id/runs     - Get runs for session
+
+POST /mcp/run                   - Main MCP orchestration endpoint
+  Body: { eye, input, sessionId }
+  Returns: Envelope
+
+GET  /api/routing               - List Eye routing configs
+POST /api/routing               - Update routing config
+  Body: { eye, primaryProvider, primaryModel, ... }
+
+GET  /api/personas              - List personas for Eye
+POST /api/personas              - Create/activate persona
+GET  /api/personas/:id          - Get persona by ID
+PUT  /api/personas/:id/activate - Activate persona
+
+GET  /api/models/:provider      - List models for provider
+POST /api/provider-keys         - Save encrypted API key
+  Body: { provider, label, apiKey }
+```
+
+**WebSocket Protocol**:
+```typescript
+// Client → Server
+{ type: 'ping' }
+
+// Server → Client
+{ type: 'pong', timestamp }
+{ type: 'run_started', sessionId, data: { runId, eye, input } }
+{ type: 'run_completed', sessionId, data: { runId, envelope } }
+{ type: 'error', sessionId, data: { message } }
+```
+
+**File**: `apps/server/src/index.ts`
+
+### 5. Web Portal (`apps/ui`)
+
+**Framework**: Next.js 15 (App Router, React Server Components)
+
+**Pages**:
+```
+/                        - Landing page with quick start
+/session/[id]           - Session monitor with real-time updates
+/models                 - Provider setup, API keys, routing matrix
+/personas               - Persona CRUD and version management
+/settings               - Global configuration
+```
+
+**Key Features**:
+- **WebSocket Integration**: Live updates when runs complete
+- **API Key Management**: Encrypted storage with visual feedback (🔒)
+- **Model Selection**: Dynamic dropdowns populated from provider APIs
+- **Routing Matrix**: Configure primary/fallback for each Eye
+- **Persona Editor**: Markdown support for system prompts
+
+**File**: `apps/ui/src/app/session/[id]/page.tsx`
 
 ## Data Flow
 
-### 1. Validation Request
+### Example: Running Sharingan Eye
 
 ```
-┌─────────┐                                 ┌─────────────┐
-│ Client  │──(1) POST /validate ───────────▶│ API Server  │
-└─────────┘     X-API-Key: xxx              └──────┬──────┘
-                                                    │
-                                         (2) Validate API Key
-                                                    │
-                                         (3) Check Tenant Quota
-                                                    │
-                                                    ▼
-                                            ┌───────────────┐
-                                            │ Orchestrator  │
-                                            └───────┬───────┘
-                                                    │
-                                         (4) Invoke LLM for routing
-                                                    │
-                                                    ▼
-                                            ┌───────────────┐
-                                            │ Eye Registry  │
-                                            └───────┬───────┘
-                                                    │
-                                    (5) Execute eyes in sequence
-                                                    │
-          ┌─────────────┬───────────────┬──────────┴────────┬──────────┐
-          ▼             ▼               ▼                    ▼          │
-    ┌─────────┐   ┌─────────┐   ┌──────────┐        ┌──────────┐     │
-    │Sharingan│   │Rinnegan │   │Tenseigan │        │Byakugan  │     │
-    └────┬────┘   └────┬────┘   └─────┬────┘        └─────┬────┘     │
-         │             │              │                     │          │
-         └─────────────┴──────────────┴─────────────────────┘          │
-                                      │                                │
-                        (6) Aggregate results                          │
-                                      │                                │
-                                      ▼                                │
-                              ┌───────────────┐                        │
-                              │  Synthesizer  │                        │
-                              └───────┬───────┘                        │
-                                      │                                │
-                        (7) Return comprehensive response              │
-                                      │                                │
-┌─────────┐                          │                                │
-│ Client  │◀─────────────────────────┘                                │
-└─────────┘                                                            │
-     │                                                                 │
-     │                                                                 │
-     └─────────────────────(8) WebSocket updates─────────────────────┘
+1. User clicks "Run sharingan" in UI
+   ↓
+2. UI sends POST /mcp/run
+   Body: { eye: 'sharingan', input: 'Explain recursion', sessionId: 'abc123' }
+   ↓
+3. Server routes to mcp.ts handler
+   ↓
+4. EyeOrchestrator.run() called
+   ↓
+5. Fetch routing config from DB
+   → Primary: groq/llama-3.3-70b-versatile
+   → Fallback: openrouter/meta-llama/llama-3.1-70b-instruct
+   ↓
+6. Fetch active persona for sharingan
+   → Template: "You are a code generation expert..."
+   ↓
+7. Build CompletionRequest
+   → messages: [{ role: 'system', content: persona }, { role: 'user', content: input }]
+   ↓
+8. ProviderFactory creates GroqProvider
+   ↓
+9. GroqProvider.complete() called (with retry logic)
+   → Attempt 1: 500 Internal Server Error → wait 100ms
+   → Attempt 2: 500 Internal Server Error → wait 300ms
+   → Attempt 3: Success!
+   ↓
+10. Envelope created
+    → { tag: 'ok', value: { output: '...' } }
+    ↓
+11. Save run to database
+    ↓
+12. Broadcast WebSocket message
+    → { type: 'run_completed', sessionId: 'abc123', data: { envelope } }
+    ↓
+13. UI receives WebSocket message and refreshes run list
+    ↓
+14. User sees response
 ```
 
----
+## Security
 
-### 2. Real-time Updates (WebSocket)
+### API Key Encryption
 
+**Algorithm**: AES-256-GCM (Authenticated Encryption)
+
+**Process**:
+1. User enters API key in UI
+2. UI sends key to `/api/provider-keys`
+3. Server generates random IV (12 bytes)
+4. Server derives key from `THIRD_EYE_SECURITY_ENCRYPTION_KEY` env var using PBKDF2
+5. Server encrypts key with AES-256-GCM
+6. Server stores `{ encryptedKey, iv, tag }` in database
+7. On provider use, server decrypts key and injects into provider client
+
+**File**: `packages/db/encryption.ts`
+
+### Environment Variables
+
+```bash
+THIRD_EYE_SECURITY_ENCRYPTION_KEY=your-secure-key-here  # Required for API key encryption
+MCP_PORT=7070                                           # Server port (default: 7070)
+MCP_HOST=127.0.0.1                                      # Server host (bind 0.0.0.0 only when secured)
+MCP_ALLOWED_ORIGINS=http://localhost:3300               # Comma-separated CORS whitelist and MCP clients
+MCP_AUTO_OPEN=true                                      # Auto-open portal on start
+MCP_UI_PORT=3300                                        # Next.js UI port
+MCP_DB=~/.third-eye-mcp/mcp.db                          # SQLite database path
 ```
-┌─────────┐                                  ┌──────────────┐
-│ Client  │──(1) WS /ws/pipeline/{id} ──────▶│  API Server  │
-└─────────┘     Sec-WebSocket-Protocol:      └──────┬───────┘
-                api-key-{key}                        │
-                                          (2) Validate API Key
-                                                     │
-                                          (3) Register with Bus
-                                                     │
-                                                     ▼
-                                             ┌───────────────┐
-                                             │ Pipeline Bus  │
-                                             └───────┬───────┘
-                                                     │
-                                       (4) Broadcast events to
-                                           session subscribers
-                                                     │
-┌─────────┐                                         │
-│ Client  │◀────────────────────────────────────────┘
-└─────────┘     Progress events in real-time
-
-Event Types:
-• eye_update - Eye completion
-• settings_update - Configuration change
-• orchestration_progress - Pipeline progress
-• custom_event - Application-specific
-```
-
----
-
-### 3. Admin Operations
-
-```
-┌─────────┐                                  ┌──────────────┐
-│ Admin   │──(1) POST /admin/auth/login ────▶│  API Server  │
-│ Client  │                                   └──────┬───────┘
-└─────────┘    {email, password}                     │
-                                           (2) Verify credentials
-     │                                                │
-     │                                     (3) Generate API key
-     │                                                │
-     │                                     (4) Set CSRF cookie
-     │                                                │
-     │                                     (5) Create admin session
-     │                                                │
-     │◀────────────────────────────────────────────────┘
-     │         {api_key, csrf_token}
-     │
-     │
-     └──(6) POST /admin/tenants ────────────────────▶ Middleware
-         X-API-Key: {key}                                │
-         X-CSRF-Token: {token}                           │
-                                               (7) Validate CSRF
-                                                          │
-                                               (8) Check admin role
-                                                          │
-                                               (9) Extend session TTL
-                                                          │
-                                                          ▼
-                                                  ┌──────────────┐
-                                                  │   Handler    │
-                                                  └──────────────┘
-```
-
----
-
-## Security Architecture
-
-### 1. Authentication Layers
-
-```
-┌──────────────────────────────────────────────────────────┐
-│                   Request Validation                      │
-├──────────────────────────────────────────────────────────┤
-│                                                           │
-│  1. API Key Validation                                   │
-│     ✓ Key exists in database                             │
-│     ✓ Not revoked                                        │
-│     ✓ Not expired                                        │
-│                                                           │
-│  2. Tenant Isolation                                     │
-│     ✓ Key scoped to tenant                               │
-│     ✓ Cross-tenant access blocked                        │
-│                                                           │
-│  3. Role-Based Access Control                            │
-│     ✓ Admin: Full access                                 │
-│     ✓ Consumer: Validation only                          │
-│                                                           │
-│  4. CSRF Protection (Admin only)                         │
-│     ✓ Token in cookie + header                           │
-│     ✓ HMAC signature validation                          │
-│     ✓ 1-hour TTL                                         │
-│                                                           │
-│  5. Session Management                                   │
-│     ✓ Admin: 1-hour with auto-extend                     │
-│     ✓ Validation: 7-day TTL                              │
-│                                                           │
-│  6. Rate Limiting                                        │
-│     ✓ Per-tenant quotas                                  │
-│     ✓ Per-key limits                                     │
-│     ✓ Sliding window counters                            │
-│                                                           │
-└──────────────────────────────────────────────────────────┘
-```
-
----
-
-### 2. Secret Management
-
-**API Keys:**
-- Stored as bcrypt hashes (cost=12)
-- Plaintext only shown once at creation
-- Client-side encryption (AES-256-GCM) in sessionStorage
-- 100k PBKDF2 iterations for key derivation
-
-**CSRF Tokens:**
-- HMAC-SHA256 signed with server secret
-- httpOnly, secure, SameSite=strict cookies
-- 1-hour expiration
-- Validated on every state-changing request
-
-**Session Storage:**
-- Redis with automatic TTL expiration
-- Encrypted values for sensitive data
-- Separate keyspaces per tenant
-
----
-
-## Scalability
-
-### Horizontal Scaling
-
-```
-                    ┌──────────────┐
-                    │ Load Balancer│
-                    └──────┬───────┘
-                           │
-          ┌────────────────┼────────────────┐
-          ▼                ▼                ▼
-    ┌─────────┐      ┌─────────┐     ┌─────────┐
-    │ API #1  │      │ API #2  │     │ API #3  │
-    └────┬────┘      └────┬────┘     └────┬────┘
-         │                │                │
-         └────────────────┼────────────────┘
-                          │
-          ┌───────────────┼───────────────┐
-          ▼               ▼               ▼
-    ┌──────────┐   ┌───────────┐   ┌──────────┐
-    │PostgreSQL│   │   Redis   │   │   LLM    │
-    │ (Primary)│   │  Cluster  │   │ Provider │
-    └──────────┘   └───────────┘   └──────────┘
-```
-
-**Considerations:**
-- Stateless API servers
-- Shared Redis for session state
-- Database connection pooling
-- WebSocket sticky sessions (optional)
-- LLM provider failover
-
----
-
-### Performance Optimization
-
-**Caching Strategy:**
-
-| Data | Cache | TTL | Invalidation |
-|------|-------|-----|--------------|
-| LLM health | Redis | 30s | Time-based |
-| Tenant quotas | Redis | Persistent | On update |
-| API key lookups | Redis | 5min | On revoke |
-| Session settings | Redis | 1hour | On change |
-
-**Database Optimization:**
-- Indexes on session_id, tenant_id, created_at
-- Partitioning for audit_events (monthly)
-- Connection pool (min=5, max=20)
-- Read replicas for analytics
-
----
 
 ## Deployment
 
-### Docker Compose Architecture
+### Development
 
-```yaml
-services:
-  api:
-    image: third-eye-api:latest
-    ports: ["8000:8000"]
-    environment:
-      - DATABASE_URL
-      - REDIS_URL
-      - GROQ_API_KEY
-    depends_on: [postgres, redis]
-
-  postgres:
-    image: postgres:15
-    volumes: ["pgdata:/var/lib/postgresql/data"]
-
-  redis:
-    image: redis:7
-    volumes: ["redisdata:/data"]
-
-  control-plane:
-    image: third-eye-control-plane:latest
-    ports: ["3000:3000"]
-
-  overseer-portal:
-    image: third-eye-portal:latest
-    ports: ["5173:5173"]
+```bash
+bun install
+bun run setup    # Seed database
+bun run dev      # Start server + UI
 ```
 
----
+### Production (Docker)
 
-### Kubernetes Deployment
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: third-eye-api
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: third-eye-api
-  template:
-    spec:
-      containers:
-      - name: api
-        image: third-eye-api:latest
-        ports:
-        - containerPort: 8000
-        env:
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: third-eye-secrets
-              key: database-url
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          initialDelaySeconds: 10
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /health/ready
-            port: 8000
-          initialDelaySeconds: 5
-          periodSeconds: 5
+```bash
+cd docker
+docker compose up -d
 ```
 
----
+**Stack**:
+- `server` (Bun container, port 7070)
+- `ui` (Next.js container, port 3300)
+- `ollama` (Optional, for local AI)
+
+### Global Installation (npm)
+
+```bash
+bunx third-eye-mcp up
+```
+
+Starts the MCP server and dashboard using the Bun runtime (Bun must be installed).
+
+## Testing
+
+**Framework**: Vitest (unit) + Playwright (E2E)
+
+**Structure**:
+```
+packages/providers/__tests__/groq.test.ts    # Provider unit tests
+packages/core/__tests__/orchestrator.test.ts # Orchestrator logic
+apps/server/__tests__/mcp.test.ts            # API integration tests
+apps/ui/tests/e2e/session-flow.spec.ts       # E2E user flows
+```
+
+**Commands**:
+```bash
+bun test           # Unit tests
+bun run e2e        # E2E tests
+tsc --noEmit       # Type check
+```
+
+## Performance Considerations
+
+### Retry Backoff
+
+Exponential backoff prevents overwhelming failing providers:
+- Attempt 1: Immediate
+- Attempt 2: +100ms
+- Attempt 3: +300ms
+- Total: ~400ms max retry time
+
+### WebSocket Cleanup
+
+Stale connections removed every 5 minutes (30-minute threshold).
+
+### Database
+
+SQLite with indexed foreign keys for fast session/run lookups.
+
+### Streaming
+
+Future enhancement: Support streaming completions via Server-Sent Events (SSE).
+
+## Extensibility
+
+### Adding a New Eye
+
+1. Register in `packages/core/registry.ts`:
+```typescript
+export const EYES_REGISTRY = {
+  byakugan: {
+    name: 'Byakugan',
+    description: 'Your Eye description',
+    personaTemplate: `System prompt...`,
+    defaultRouting: { /* ... */ }
+  }
+};
+```
+
+2. Seed database:
+```bash
+bun run setup
+```
+
+3. Update UI in `apps/ui/src/app/session/[id]/page.tsx`:
+```typescript
+const EYES = ['sharingan', 'rinnegan', 'tenseigan', 'byakugan'];
+```
+
+### Adding a New Provider
+
+1. Create provider class in `packages/providers/your-provider.ts`:
+```typescript
+export class YourProvider implements ProviderClient {
+  async listModels(): Promise<ModelInfo[]> { /* ... */ }
+  async complete(req: CompletionRequest): Promise<CompletionResponse> { /* ... */ }
+  async health(): Promise<HealthResponse> { /* ... */ }
+}
+```
+
+2. Update factory in `packages/providers/factory.ts`:
+```typescript
+case 'your-provider':
+  return new YourProvider(config.baseUrl, config.apiKey);
+```
+
+3. Update types in `packages/types/providers.ts`:
+```typescript
+export type ProviderId = 'groq' | 'openrouter' | 'ollama' | 'lmstudio' | 'your-provider';
+```
 
 ## Monitoring
 
-### Health Checks
+### Server Logs
 
-**Liveness:** `/health`
-- Returns 200 if server is running
-- No external dependencies checked
+```bash
+🚀 Third Eye MCP Server running at http://127.0.0.1:7070
+📡 WebSocket endpoint: ws://127.0.0.1:7070/ws/monitor?sessionId=<id>
+🌐 Opening Third Eye Portal: http://127.0.0.1:3300
 
-**Readiness:** `/health/ready`
-- Returns 200 if ready to serve traffic
-- Checks: Database, Redis, LLM connectivity
+📡 WebSocket connected: abc-123 → session:xyz-789
+📡 Broadcasted run_completed to 2 connections for session:xyz-789
+```
 
-### Metrics
+### Health Endpoint
 
-**Prometheus Endpoint:** `/metrics`
+```bash
+curl http://127.0.0.1:7070/health
+# {"status":"ok","timestamp":1704067200000}
+```
 
-Key metrics:
-- `http_requests_total` - Request count by endpoint
-- `http_request_duration_seconds` - Request latency
-- `llm_calls_total` - LLM invocations
-- `validation_errors_total` - Validation failures
-- `active_sessions` - Current session count
-- `tenant_quota_usage` - Per-tenant usage
+## Troubleshooting
 
----
+See [FAQ.md](./FAQ.md) for common issues and solutions.
 
-## Future Architecture Enhancements
+## References
 
-1. **Circuit Breaker Pattern**
-   - Automatic LLM failover
-   - Graceful degradation
-
-2. **Event Sourcing**
-   - Complete audit trail replay
-   - Point-in-time recovery
-
-3. **Distributed Tracing**
-   - OpenTelemetry integration
-   - Request correlation
-
-4. **Multi-Region Deployment**
-   - Geographic load balancing
-   - Data residency compliance
-
-5. **Async Processing**
-   - Background job queue
-   - Webhook callbacks
-
----
-
-**End of Architecture Documentation**
+- [Bun Documentation](https://bun.sh/docs)
+- [Hono Framework](https://hono.dev)
+- [Next.js 15](https://nextjs.org/docs)
+- [Drizzle ORM](https://orm.drizzle.team)
+- [WebSocket Protocol (RFC 6455)](https://datatracker.ietf.org/doc/html/rfc6455)
